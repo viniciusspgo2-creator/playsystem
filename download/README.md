@@ -42,7 +42,7 @@
 
 Leia o **`DEPLOY.md`** (incluído no ZIP) com instruções completas:
 - Variáveis de ambiente (DATABASE_URL, AUTH_SECRET)
-- Trocar `schema.prisma` por `schema.vercel.prisma` (PostgreSQL)
+- O `schema.prisma` já é PostgreSQL (Vercel/Neon); SQLite local fica em `schema.sqlite.prisma`
 - O seed do catálogo é automático no primeiro login
 
 ## 🔑 Credenciais do preview (sandbox)
@@ -69,8 +69,8 @@ src/
 └── lib/              # auth, store, format, api-hooks
 
 prisma/
-├── schema.prisma          # SQLite (dev local)
-└── schema.vercel.prisma    # PostgreSQL (Vercel)
+├── schema.prisma          # PostgreSQL (Vercel/Neon) — padrão
+└── schema.sqlite.prisma   # SQLite (somente dev local)
 
 DEPLOY.md    # instruções de deploy
 ```

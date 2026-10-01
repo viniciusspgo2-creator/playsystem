@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: "standalone",
+  // "standalone" só fora da Vercel (self-host com bun/Caddy); na Vercel usa o output padrão
+  ...(process.env.VERCEL ? {} : { output: "standalone" as const }),
   reactStrictMode: false,
   images: {
     remotePatterns: [

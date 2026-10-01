@@ -18,10 +18,9 @@ Configure no painel da Vercel → Settings → Environment Variables:
 1. **Suba o código para um repositório Git** (GitHub/GitLab/Bitbucket).
 2. **No painel da Vercel**: "Add New Project" → importe o repositório.
 3. **Configurar variáveis** (ver seção A).
-4. **Antes do primeiro deploy**, troque o schema para PostgreSQL:
-   - Copie o conteúdo de `prisma/schema.vercel.prisma` para `prisma/schema.prisma`
-   (ou rode: `cp prisma/schema.vercel.prisma prisma/schema.prisma`)
-   - Faça commit e push.
+4. **O `prisma/schema.prisma` já é PostgreSQL** (pronto pra Vercel + Neon). Não precisa trocar nada.
+   - `DATABASE_URL` precisa começar com `postgresql://` (se começar com outra coisa, ou se o schema estiver em `sqlite`, dá o erro P1012 "the URL must start with the protocol `file:`").
+   - Para rodar local com SQLite: `cp prisma/schema.sqlite.prisma prisma/schema.prisma` e `DATABASE_URL="file:./dev.db"` (não commite essa troca).
 5. **O script de build** já está pronto em `package.json`:
    ```
    "build": "prisma generate && prisma db push --accept-data-loss --skip-generate && next build"
@@ -31,7 +30,7 @@ Configure no painel da Vercel → Settings → Environment Variables:
 
 ### Após o primeiro deploy (rodar UMA vez)
 
-- **Seed do catálogo**: ao fazer o **primeiro login** (setup da senha), o sistema detecta que não há tipos de serviço e **自动omaticamente** faz o seed de:
+- **Seed do catálogo**: ao fazer o **primeiro login** (setup da senha), o sistema detecta que não há tipos de serviço e **automaticamente** faz o seed de:
   - 7 tipos de serviço (Arte, Vídeo, Site, Sistemas PHP, Automações, Dublagem de Vídeos, Text-to-Speech)
   - 3 carteiras (Nubank, PicPay, Mercado Pago)
   - 7 cartões de crédito (Credicard, Banco BV, Mercado Pago, PicPay, Wise, PayPal, Nubank Crédito)
@@ -87,8 +86,8 @@ src/
     └── store.ts             # Zustand (view, sidebar, authed)
 
 prisma/
-├── schema.prisma          # SQLite (dev local / preview)
-└── schema.vercel.prisma   # PostgreSQL + binaryTargets (Vercel)
+├── schema.prisma          # PostgreSQL + binaryTargets (Vercel/Neon) — padrão
+└── schema.sqlite.prisma   # SQLite (somente dev local)
 ```
 
 ## Funcionalidades

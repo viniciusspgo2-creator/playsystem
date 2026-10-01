@@ -1,14 +1,13 @@
-// PlayMedia System - Prisma Schema (PostgreSQL / Neon / Vercel)
-// DATABASE_URL deve começar com postgresql:// (string de conexão do Neon).
-// Versão SQLite para dev local: prisma/schema.sqlite.prisma
+// PlayMedia System - Prisma Schema (SQLite - SOMENTE DEV LOCAL)
+// Para usar localmente: cp prisma/schema.sqlite.prisma prisma/schema.prisma
+// e DATABASE_URL="file:./dev.db". O schema.prisma padrão é PostgreSQL (Vercel/Neon).
 
 generator client {
-  provider      = "prisma-client-js"
-  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+  provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -39,7 +38,7 @@ model Client {
   zip         String?
   notes       String?
   isMonthly   Boolean  @default(false)
-  monthlyFee  Decimal? @db.Decimal(10, 2)
+  monthlyFee  Decimal?
   monthlyDay  Int?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -60,7 +59,7 @@ model ServiceType {
   description String?
   color       String   @default("#FF6B00")
   icon        String?
-  basePrice   Decimal? @db.Decimal(10, 2)
+  basePrice   Decimal?
   active      Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -80,8 +79,8 @@ model ServiceOrder {
   description  String?
   status       String   @default("todo")
   priority     String   @default("medium")
-  price        Decimal  @db.Decimal(10, 2)
-  cost         Decimal  @db.Decimal(10, 2) @default(0)
+  price        Decimal
+  cost         Decimal  @default(0)
   deadline     DateTime?
   startedAt    DateTime?
   finishedAt   DateTime?
@@ -107,10 +106,10 @@ model ServiceOrder {
 // ============================================================
 model Transaction {
   id            String   @id @default(cuid())
-  type          String
+  type          String   // income | expense
   category      String
   description   String
-  amount        Decimal  @db.Decimal(10, 2)
+  amount        Decimal
   date          DateTime @default(now())
   paymentMethod String?
   walletId      String?
@@ -138,7 +137,7 @@ model FixedAccount {
   id            String   @id @default(cuid())
   name          String
   category      String
-  amount        Decimal  @db.Decimal(10, 2)
+  amount        Decimal
   dueDay        Int
   paymentMethod String?
   walletId      String?
@@ -157,13 +156,13 @@ model FixedAccount {
 model Payable {
   id            String   @id @default(cuid())
   description   String
-  amount        Decimal  @db.Decimal(10, 2)
+  amount        Decimal
   dueDate       DateTime
   paid          Boolean  @default(false)
   paidAt        DateTime?
   paymentMethod String?
   walletId      String?
-  creditCardId String?
+  creditCardId  String?
   category      String?
   supplier      String?
   notes         String?
@@ -181,7 +180,7 @@ model Receivable {
   id            String   @id @default(cuid())
   clientId      String
   description   String
-  amount        Decimal  @db.Decimal(10, 2)
+  amount        Decimal
   dueDate       DateTime
   received      Boolean  @default(false)
   receivedAt    DateTime?
@@ -204,7 +203,7 @@ model Wallet {
   id          String   @id @default(cuid())
   name        String
   type        String
-  balance     Decimal  @db.Decimal(10, 2) @default(0)
+  balance     Decimal  @default(0)
   color       String   @default("#0066FF")
   icon        String?
   active      Boolean  @default(true)
@@ -226,8 +225,8 @@ model CreditCard {
   id          String   @id @default(cuid())
   name        String
   walletId    String?
-  totalLimit  Decimal  @db.Decimal(10, 2)
-  usedLimit   Decimal  @db.Decimal(10, 2) @default(0)
+  totalLimit  Decimal
+  usedLimit   Decimal  @default(0)
   closingDay  Int?
   dueDay      Int?
   color       String   @default("#FF6B00")
@@ -247,9 +246,9 @@ model CreditCard {
 model Goal {
   id            String   @id @default(cuid())
   name          String
-  targetAmount  Decimal  @db.Decimal(10, 2)
-  currentAmount Decimal  @db.Decimal(10, 2) @default(0)
-  minDeposit    Decimal  @db.Decimal(10, 2)
+  targetAmount  Decimal
+  currentAmount Decimal  @default(0)
+  minDeposit    Decimal
   deadline      DateTime?
   walletId      String?  @unique
   active        Boolean  @default(true)
@@ -269,7 +268,7 @@ model Receipt {
   orderId       String?
   payer         String
   recipient     String
-  amount        Decimal  @db.Decimal(10, 2)
+  amount        Decimal
   description   String
   paymentMethod String
   date          DateTime @default(now())
@@ -289,10 +288,10 @@ model Budget {
   clientId    String?
   orderId     String?
   title       String
-  items       String   // JSON string (o código grava JSON.stringify)
-  total       Decimal  @db.Decimal(10, 2)
-  discount    Decimal  @db.Decimal(10, 2) @default(0)
-  finalTotal  Decimal  @db.Decimal(10, 2)
+  items       String   // JSON string (SQLite doesn't support Json)
+  total       Decimal
+  discount    Decimal  @default(0)
+  finalTotal  Decimal
   validUntil  DateTime?
   status      String   @default("draft")
   notes       String?

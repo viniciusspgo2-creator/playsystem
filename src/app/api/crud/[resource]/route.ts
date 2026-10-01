@@ -28,17 +28,17 @@ export async function GET(
       const fields: any[] = [];
       if (resource === "clients")
         fields.push(
-          { name: { contains: search } },
-          { email: { contains: search } },
-          { phone: { contains: search } }
+          { name: { contains: search, mode: "insensitive" } },
+          { email: { contains: search, mode: "insensitive" } },
+          { phone: { contains: search, mode: "insensitive" } }
         );
       if (resource === "service-types")
-        fields.push({ name: { contains: search } });
+        fields.push({ name: { contains: search, mode: "insensitive" } });
       if (resource === "orders")
         fields.push(
-          { title: { contains: search } },
-          { number: { contains: search } },
-          { description: { contains: search } }
+          { title: { contains: search, mode: "insensitive" } },
+          { number: { contains: search, mode: "insensitive" } },
+          { description: { contains: search, mode: "insensitive" } }
         );
       where.OR = fields;
     }
