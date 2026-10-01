@@ -166,6 +166,7 @@ model Payable {
   dueDate       DateTime
   paid          Boolean  @default(false)
   paidAt        DateTime?
+  transactionId String?  // lançamento em Entradas & Saídas gerado quando paga
   paymentMethod String?
   walletId      String?
   creditCardId  String?
@@ -191,6 +192,7 @@ model Receivable {
   dueDate       DateTime
   received      Boolean  @default(false)
   receivedAt    DateTime?
+  transactionId String?  // lançamento em Entradas & Saídas gerado quando recebe
   paymentMethod String?
   walletId      String?
   orderId       String?

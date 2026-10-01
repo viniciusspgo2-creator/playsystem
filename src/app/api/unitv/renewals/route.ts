@@ -33,6 +33,21 @@ export async function POST(req: NextRequest) {
 
     const months = Math.max(1, parseInt(body.planMonths, 10) || 1);
     const amount = parseMoney(body.amount);
+    if (amount < 0)
+      return NextResponse.json({ error: "O valor não pode ser negativo." }, { status: 400 });
+    if (amount > 0) {
+      if (!body.walletId)
+        return NextResponse.json(
+          { error: "Escolha a carteira que recebeu o pagamento — o valor precisa entrar no caixa." },
+          { status: 400 }
+        );
+      const wallet = await db.wallet.findUnique({ where: { id: String(body.walletId) } });
+      if (!wallet)
+        return NextResponse.json(
+          { error: "A carteira escolhida não existe mais. Atualize a página e tente de novo." },
+          { status: 400 }
+        );
+    }
     const paidAt = parseDateInput(body.paidAt || "") || todayBR();
     const newExpiry =
       parseDateInput(body.newExpiry || "") || computeNewExpiry(ymd(client.expiresAt), paidAt, months);

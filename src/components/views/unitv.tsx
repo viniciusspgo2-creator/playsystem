@@ -436,6 +436,10 @@ export function UnitvView() {
           client={clientDialog.client}
           wallets={wallets ?? []}
           onClose={() => setClientDialog(null)}
+          onRenew={(c) => {
+            setClientDialog(null);
+            setRenewFor(c);
+          }}
         />
       )}
       {renewFor && <RenewDialog client={renewFor} wallets={wallets ?? []} onClose={() => setRenewFor(null)} />}
@@ -544,10 +548,12 @@ function ClientDialog({
   client,
   wallets,
   onClose,
+  onRenew,
 }: {
   client: IptvClient | null;
   wallets: WalletLite[];
   onClose: () => void;
+  onRenew?: (c: IptvClient) => void;
 }) {
   const refresh = useRefresh();
   const isEdit = !!client;
@@ -560,13 +566,15 @@ function ClientDialog({
   const [lastAmount, setLastAmount] = useState(moneyStr(client?.lastAmount));
   const [expiryManual, setExpiryManual] = useState<string | null>(null);
 
-  const [activation, setActivation] = useState(false);
+  const [activation, setActivation] = useState(true);
   const [months, setMonths] = useState(1);
   const [amount, setAmount] = useState("");
   const [paidAt, setPaidAt] = useState(todayBR());
-  const [walletId, setWalletId] = useState("");
+  const [walletId, setWalletId] = useState(wallets[0]?.id ?? "");
   const [method, setMethod] = useState("pix");
   const [loading, setLoading] = useState(false);
+
+  const walletName = wallets.find((w) => w.id === walletId)?.name;
 
   // Vencimento: o que o usuário digitou, senão calculado pelo plano (ativação), senão o atual do cliente
   const expiry =
@@ -575,6 +583,19 @@ function ClientDialog({
   async function save() {
     if (!name.trim()) return toast.error("Informe o nome do cliente.");
     if (!parseDateInput(expiry)) return toast.error("Informe um vencimento válido.");
+    const paying = !isEdit && activation;
+    if (paying && parseMoney(amount) <= 0)
+      return toast.error(
+        "Informe o valor pago (maior que zero). Se ele ainda não pagou, desligue \"Recebi um pagamento agora\"."
+      );
+    if (paying) {
+      if (wallets.length === 0)
+        return toast.error(
+          "Você ainda não tem carteiras. Crie uma na aba Carteiras para o dinheiro entrar no caixa."
+        );
+      if (!walletId)
+        return toast.error("Escolha a carteira que recebeu o pagamento — o dinheiro precisa entrar no caixa.");
+    }
     setLoading(true);
     try {
       const base = { name, phone, username, notes, expiresAt: expiry };
@@ -586,10 +607,19 @@ function ClientDialog({
           ...base,
           activation: { planMonths: months, amount, paidAt, walletId, paymentMethod: method },
         });
-        toast.success("Cliente ativado e pagamento lançado");
+        toast.success(`Cliente ativado • ${formatCurrency(parseMoney(amount))} no caixa`, {
+          description: walletName
+            ? `Entrada lançada na carteira ${walletName} e em Entradas & Saídas.`
+            : "Entrada lançada no caixa.",
+        });
       } else {
         await apiPost("/api/unitv/clients", { ...base, lastAmount });
-        toast.success("Cliente cadastrado");
+        toast.success("Cliente cadastrado", {
+          description:
+            parseMoney(lastAmount) > 0
+              ? "O valor informado é só referência — quando ele pagar, use o botão Renovar para lançar no caixa."
+              : undefined,
+        });
       }
       refresh();
       onClose();
@@ -623,7 +653,7 @@ function ClientDialog({
           <DialogTitle>{isEdit ? "Editar cliente UNITV" : "Novo cliente UNITV"}</DialogTitle>
           <DialogDescription>
             {isEdit
-              ? "Ajuste os dados. Para registrar pagamento, use o botão Renovar."
+              ? "Ajuste os dados do cadastro. Para lançar um pagamento no caixa, use Registrar pagamento aqui embaixo."
               : "Cadastre um cliente que já está no painel ou ative um cliente novo."}
           </DialogDescription>
         </DialogHeader>
@@ -643,10 +673,12 @@ function ClientDialog({
           </div>
 
           {!isEdit && (
-            <div className="sm:col-span-2 flex items-center justify-between rounded-xl border border-border/60 bg-muted/40 px-3 py-2.5">
+            <div className="sm:col-span-2 flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-muted/40 px-3 py-2.5">
               <div>
-                <p className="text-sm font-medium">Cliente novo (ativação paga agora)</p>
-                <p className="text-xs text-muted-foreground">Lança o pagamento e calcula o vencimento.</p>
+                <p className="text-sm font-medium">Recebi um pagamento agora (lançar no caixa)</p>
+                <p className="text-xs text-muted-foreground">
+                  Ativação nova ou renovação que ele acabou de pagar: vira entrada no caixa e calcula o vencimento.
+                </p>
               </div>
               <Switch checked={activation} onCheckedChange={setActivation} />
             </div>
@@ -685,6 +717,20 @@ function ClientDialog({
                   setMethod={setMethod}
                 />
               </div>
+              {parseMoney(amount) > 0 && (
+                <div className="sm:col-span-2 flex items-start gap-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5">
+                  <WalletIcon className="h-4 w-4 mt-0.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <div className="text-sm min-w-0">
+                    <p className="font-semibold text-emerald-700 dark:text-emerald-300">
+                      Entrada de {formatCurrency(parseMoney(amount))} no caixa
+                    </p>
+                    <p className="text-xs text-emerald-700/80 dark:text-emerald-400/80">
+                      {walletName ? `Carteira ${walletName}` : "escolha a carteira"} • {fmtBR(paidAt)} • vencimento{" "}
+                      {fmtBR(expiry)}
+                    </p>
+                  </div>
+                </div>
+              )}
             </>
           )}
 
@@ -707,6 +753,9 @@ function ClientDialog({
                 className="h-10"
                 placeholder="25,00"
               />
+              <p className="text-[11px] text-muted-foreground">
+                Só referência — <strong>não entra no caixa</strong>. Quando ele pagar, use o botão Renovar para lançar.
+              </p>
             </div>
           )}
 
@@ -735,9 +784,14 @@ function ClientDialog({
           <Button variant="outline" onClick={onClose} disabled={loading}>
             Cancelar
           </Button>
+          {isEdit && onRenew && client && (
+            <Button variant="outline" onClick={() => onRenew(client)} disabled={loading}>
+              <RefreshCw className="h-4 w-4 mr-2" /> Registrar pagamento
+            </Button>
+          )}
           <Button onClick={save} disabled={loading}>
             {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            {isEdit ? "Salvar" : activation ? "Ativar cliente" : "Cadastrar"}
+            {isEdit ? "Salvar" : activation ? "Ativar cliente e lançar pagamento" : "Cadastrar"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -765,16 +819,26 @@ function RenewDialog({
   const [amount, setAmount] = useState(moneyStr(client.lastAmount));
   const [paidAt, setPaidAt] = useState(todayBR());
   const [expiryManual, setExpiryManual] = useState<string | null>(null);
-  const [walletId, setWalletId] = useState("");
+  const [walletId, setWalletId] = useState(wallets[0]?.id ?? "");
   const [method, setMethod] = useState("pix");
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const walletName = wallets.find((w) => w.id === walletId)?.name;
 
   // Novo vencimento: o que o usuário digitou, senão calculado (soma no atual se ainda ativo; senão a partir do pagamento)
   const newExpiry = expiryManual ?? computeNewExpiry(current, paidAt, months);
 
   async function save() {
     if (!parseDateInput(newExpiry)) return toast.error("Informe um novo vencimento válido.");
+    if (parseMoney(amount) > 0) {
+      if (wallets.length === 0)
+        return toast.error(
+          "Você ainda não tem carteiras. Crie uma na aba Carteiras para o dinheiro entrar no caixa."
+        );
+      if (!walletId)
+        return toast.error("Escolha a carteira que recebeu o pagamento — o dinheiro precisa entrar no caixa.");
+    }
     setLoading(true);
     try {
       await apiPost("/api/unitv/renewals", {
@@ -788,7 +852,10 @@ function RenewDialog({
         notes,
       });
       toast.success(`Renovado até ${fmtBR(newExpiry)}`, {
-        description: parseMoney(amount) > 0 ? `${formatCurrency(parseMoney(amount))} lançado em Entradas.` : undefined,
+        description:
+          parseMoney(amount) > 0
+            ? `${formatCurrency(parseMoney(amount))} lançados no caixa${walletName ? ` (${walletName})` : ""}.`
+            : undefined,
       });
       refresh();
       onClose();
@@ -850,6 +917,21 @@ function RenewDialog({
           </div>
 
           <WalletMethod wallets={wallets} walletId={walletId} setWalletId={setWalletId} method={method} setMethod={setMethod} />
+
+          {parseMoney(amount) > 0 && (
+            <div className="flex items-start gap-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5">
+              <WalletIcon className="h-4 w-4 mt-0.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <div className="text-sm min-w-0">
+                <p className="font-semibold text-emerald-700 dark:text-emerald-300">
+                  Entrada de {formatCurrency(parseMoney(amount))} no caixa
+                </p>
+                <p className="text-xs text-emerald-700/80 dark:text-emerald-400/80">
+                  {walletName ? `Carteira ${walletName}` : "escolha a carteira"} • {fmtBR(paidAt)} • novo vencimento{" "}
+                  {fmtBR(newExpiry)}
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <Label className="text-xs font-medium">Observação</Label>
@@ -1001,7 +1083,8 @@ function ImportDialog({ onClose }: { onClose: () => void }) {
           <DialogDescription>
             Cole uma linha por cliente, no formato:{" "}
             <code className="text-xs">nome; whatsapp; vencimento; valor; usuário</code>. Só nome e vencimento são
-            obrigatórios. Dá para colar direto de uma planilha.
+            obrigatórios. Dá para colar direto de uma planilha. A importação <strong>não lança pagamentos no
+            caixa</strong> — quando um cliente pagar, use o botão Renovar nele.
           </DialogDescription>
         </DialogHeader>
 

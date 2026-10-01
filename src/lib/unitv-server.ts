@@ -21,6 +21,11 @@ export async function recordPayment(
     notes?: string | null;
   }
 ) {
+  // Regras de ouro: dinheiro não pode sumir nem entrar do nada.
+  if (p.amount < 0) throw new Error("O valor pago não pode ser negativo.");
+  if (p.amount > 0 && !p.walletId)
+    throw new Error("Escolha a carteira que recebeu o pagamento — o valor precisa entrar no caixa.");
+
   let transactionId: string | null = null;
 
   if (p.amount > 0) {
@@ -28,7 +33,7 @@ export async function recordPayment(
     const t = await tx.transaction.create({
       data: {
         type: "income",
-        category: "service",
+        category: "unitv",
         description: `UNITV - ${label} - ${p.clientName} (${p.planMonths} ${p.planMonths === 1 ? "mês" : "meses"})`,
         amount: p.amount,
         date: ymdToNoon(p.paidAt),

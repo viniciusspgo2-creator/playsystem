@@ -30,12 +30,24 @@ import {
   GripVertical,
   Pencil,
   Calendar,
+  Loader2,
+  Wallet as WalletIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
 interface Order {
@@ -102,6 +114,8 @@ export function ProductionView() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
+  const [payOrder, setPayOrder] = useState<Order | null>(null);
+  const { data: wallets } = useFetch<{ id: string; name: string }[]>("/api/crud/wallets");
 
   const clients = clientsData || [];
   const serviceTypes = serviceTypesData || [];
@@ -170,15 +184,43 @@ export function ProductionView() {
   }
 
   async function togglePaid(order: Order) {
-    const newPaid = !order.paid;
-    setOrders((items) => items.map((o) => (o.id === order.id ? { ...o, paid: newPaid } : o)));
+    // Desmarcar: só tira a marcação; a entrada no caixa continua (estorno é em A Receber)
+    if (order.paid) {
+      const prev = orders;
+      setOrders((items) => items.map((o) => (o.id === order.id ? { ...o, paid: false } : o)));
+      try {
+        await apiPost(`/api/crud/orders/${order.id}`, { paid: false }, "PUT");
+        toast.info("Marcação de pagamento removida", {
+          description:
+            "A entrada no caixa continua. Para estornar, exclua a conta a receber correspondente em A Receber.",
+        });
+        refresh();
+      } catch (e: any) {
+        toast.error(e.message);
+        setOrders(prev);
+      }
+      return;
+    }
+    // Marcar pago: se a OS já tem recebimento no caixa, só marca;
+    // senão abre o recebimento (carteira + lançamento) antes de marcar
     try {
-      await apiPost(`/api/crud/orders/${order.id}`, { paid: newPaid }, "PUT");
-      toast.success(newPaid ? "Marcado como pago" : "Marcação de pagamento removida");
-      refresh();
+      const res = await fetch(
+        `/api/crud/receivables?where=${encodeURIComponent(
+          JSON.stringify({ orderId: order.id, received: true })
+        )}`
+      );
+      const json = await res.json();
+      if ((json.data ?? []).length > 0) {
+        await apiPost(`/api/crud/orders/${order.id}`, { paid: true }, "PUT");
+        toast.success("Marcado como pago", {
+          description: "O recebimento desta OS já estava registrado no caixa.",
+        });
+        refresh();
+      } else {
+        setPayOrder(order);
+      }
     } catch (e: any) {
       toast.error(e.message);
-      setOrders((items) => items.map((o) => (o.id === order.id ? { ...o, paid: order.paid } : o)));
     }
   }
 
@@ -384,7 +426,185 @@ export function ProductionView() {
         endpoint="/api/crud/orders"
         id={editingOrder?.id}
       />
+
+      {payOrder && (
+        <OrderPayDialog
+          order={payOrder}
+          wallets={wallets ?? []}
+          onClose={() => setPayOrder(null)}
+        />
+      )}
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Receber pagamento da OS ao marcar "pago" no Kanban                  */
+/* ------------------------------------------------------------------ */
+
+function parseMoneyBR(v: string): number {
+  let s = String(v).replace(/[^\d,.-]/g, "");
+  if (s.includes(",")) s = s.replace(/\./g, "").replace(",", ".");
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
+const OS_PAY_METHODS = [
+  { value: "pix", label: "Pix" },
+  { value: "cash", label: "Dinheiro" },
+  { value: "card", label: "Cartão de Débito" },
+  { value: "transfer", label: "Transferência" },
+  { value: "credit", label: "Crédito" },
+];
+
+function OrderPayDialog({
+  order,
+  wallets,
+  onClose,
+}: {
+  order: Order;
+  wallets: { id: string; name: string }[];
+  onClose: () => void;
+}) {
+  const refresh = useRefresh();
+  const price = Number(order.price) || 0;
+  const [amount, setAmount] = useState(price > 0 ? String(price).replace(".", ",") : "");
+  const [paidAt, setPaidAt] = useState(new Date().toISOString().slice(0, 10));
+  const [walletId, setWalletId] = useState(wallets[0]?.id ?? "");
+  const [method, setMethod] = useState("pix");
+  const [loading, setLoading] = useState(false);
+
+  const walletName = wallets.find((w) => w.id === walletId)?.name;
+
+  async function save() {
+    const amt = parseMoneyBR(amount);
+    if (amt <= 0) return toast.error("Informe o valor recebido (maior que zero).");
+    if (wallets.length === 0)
+      return toast.error(
+        "Você ainda não tem carteiras. Crie uma na aba Carteiras para o dinheiro entrar no caixa."
+      );
+    if (!walletId)
+      return toast.error("Escolha a carteira que recebeu o dinheiro — o valor precisa entrar no caixa.");
+    setLoading(true);
+    try {
+      await apiPost("/api/crud/receivables", {
+        clientId: order.client?.id ?? null,
+        orderId: order.id,
+        description: `OS ${order.number} — ${order.title}`,
+        amount: amt,
+        dueDate: new Date().toISOString(),
+        received: true,
+        receivedAt: new Date(`${paidAt}T12:00:00`).toISOString(),
+        paymentMethod: method,
+        walletId,
+        notes: "Recebimento registrado pelo Kanban de Produção.",
+      });
+      await apiPost(`/api/crud/orders/${order.id}`, { paid: true }, "PUT");
+      toast.success(`OS ${order.number} paga • ${formatCurrency(amt)} no caixa`, {
+        description: walletName
+          ? `Entrada lançada na carteira ${walletName} e em Entradas & Saídas.`
+          : "Entrada lançada no caixa.",
+      });
+      refresh();
+      onClose();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Receber — {order.number}</DialogTitle>
+          <DialogDescription>
+            {order.title}
+            {order.client?.name ? ` • ${order.client.name}` : ""}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-1">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Valor recebido (R$)</Label>
+              <Input
+                inputMode="decimal"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="h-10"
+                placeholder="0,00"
+                autoFocus
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Data do recebimento</Label>
+              <Input type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} className="h-10" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Carteira que recebeu</Label>
+              <Select value={walletId || "__none__"} onValueChange={(v) => setWalletId(v === "__none__" ? "" : v)}>
+                <SelectTrigger className="h-10">
+                  <SelectValue placeholder="Nenhuma" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">— Nenhuma —</SelectItem>
+                  {wallets.map((w) => (
+                    <SelectItem key={w.id} value={w.id}>
+                      {w.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Forma de pagamento</Label>
+              <Select value={method} onValueChange={setMethod}>
+                <SelectTrigger className="h-10">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {OS_PAY_METHODS.map((m) => (
+                    <SelectItem key={m.value} value={m.value}>
+                      {m.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {parseMoneyBR(amount) > 0 && (
+            <div className="flex items-start gap-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5">
+              <WalletIcon className="h-4 w-4 mt-0.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <div className="text-sm min-w-0">
+                <p className="font-semibold text-emerald-700 dark:text-emerald-300">
+                  Entrada de {formatCurrency(parseMoneyBR(amount))} no caixa
+                </p>
+                <p className="text-xs text-emerald-700/80 dark:text-emerald-400/80">
+                  {walletName ? `Carteira ${walletName}` : "escolha a carteira"} • cria conta a receber já quitada
+                  e lançamento em Entradas & Saídas
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={onClose} disabled={loading}>
+            Cancelar
+          </Button>
+          <Button onClick={save} disabled={loading}>
+            {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+            Confirmar {parseMoneyBR(amount) > 0 ? formatCurrency(parseMoneyBR(amount)) : "recebimento"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

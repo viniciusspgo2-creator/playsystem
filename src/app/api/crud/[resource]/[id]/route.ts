@@ -3,6 +3,32 @@ import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { getModel, INCLUDES, sanitizeForeignKeys, friendlyError } from "@/lib/crud-helpers";
 
+// Remove o lançamento vinculado ESTORNANDO carteira/cartão antes de apagar
+// (o handler HTTP de transactions faz isso; aqui replicamos para uso interno)
+async function removeLinkedTransaction(transactionId: string) {
+  const t = await db.transaction.findUnique({ where: { id: transactionId } });
+  if (!t) return;
+  const amt = Number(t.amount);
+  if (t.walletId) {
+    const w = await db.wallet.findUnique({ where: { id: t.walletId } });
+    if (w) {
+      const delta = t.type === "income" ? -amt : amt;
+      await db.wallet.update({ where: { id: t.walletId }, data: { balance: Number(w.balance) + delta } });
+    }
+  }
+  if (t.creditCardId) {
+    const c = await db.creditCard.findUnique({ where: { id: t.creditCardId } });
+    if (c) {
+      const delta = t.type === "expense" ? -amt : amt;
+      await db.creditCard.update({
+        where: { id: t.creditCardId },
+        data: { usedLimit: Math.max(0, Number(c.usedLimit) + delta) },
+      });
+    }
+  }
+  await db.transaction.delete({ where: { id: transactionId } });
+}
+
 // GET /api/crud/[resource]/[id]
 export async function GET(
   req: NextRequest,
@@ -97,69 +123,159 @@ export async function PUT(
       }
     }
 
-    // Payable marking as paid
-    if (resource === "payables" && body.paid === true) {
-      const existing = await db.payable.findUnique({ where: { id } });
-      if (existing && !existing.paid) {
-        const amt = Number(existing.amount);
-        const walletId = body.walletId || existing.walletId;
-        const creditCardId = body.creditCardId || existing.creditCardId;
-        const updated = await db.payable.update({
-          where: { id },
-          data: {
-            ...body,
-            paid: true,
-            paidAt: new Date(),
-            walletId,
-            creditCardId,
-          },
-          include: INCLUDES.payables,
+    // Helper local: aplica delta no saldo de uma carteira (se existir)
+    const walletDelta = async (walletId: string | null | undefined, delta: number) => {
+      if (!walletId) return;
+      const w = await db.wallet.findUnique({ where: { id: walletId } });
+      if (w)
+        await db.wallet.update({ where: { id: walletId }, data: { balance: Number(w.balance) + delta } });
+    };
+    // Helper local: aplica delta no limite usado de um cartão (se existir)
+    const cardDelta = async (cardId: string | null | undefined, delta: number) => {
+      if (!cardId) return;
+      const c = await db.creditCard.findUnique({ where: { id: cardId } });
+      if (c)
+        await db.creditCard.update({
+          where: { id: cardId },
+          data: { usedLimit: Math.max(0, Number(c.usedLimit) + delta) },
         });
-        if (walletId) {
-          const w = await db.wallet.findUnique({ where: { id: walletId } });
-          if (w)
-            await db.wallet.update({
-              where: { id: walletId },
-              data: { balance: Number(w.balance) - amt },
-            });
+    };
+
+    // ===== Recebível: receber / estornar / editar — com lançamento vinculado em Entradas & Saídas =====
+    // Regra de ouro: receber cria um lançamento de entrada (que move a carteira);
+    // estornar/editar sempre sincroniza o lançamento. Registros antigos (sem vínculo) reconciliam direto.
+    if (resource === "receivables") {
+      const existing = await db.receivable.findUnique({ where: { id } });
+      if (existing) {
+        const was = existing.received;
+        const will = body.received === undefined ? was : !!body.received;
+        const oldAmt = Number(existing.amount);
+        const newAmt = body.amount !== undefined && body.amount !== "" ? Number(body.amount) : oldAmt;
+        const oldWalletId = existing.walletId;
+        const newWalletId = body.walletId !== undefined ? body.walletId || null : oldWalletId;
+        const finalDescription =
+          body.description !== undefined
+            ? String(body.description || "").trim() || existing.description
+            : existing.description;
+        const finalMethod = body.paymentMethod !== undefined ? body.paymentMethod || null : existing.paymentMethod;
+
+        if (!was && will) {
+          if (newAmt <= 0)
+            return NextResponse.json(
+              { error: "O valor precisa ser maior que zero para registrar o recebimento." },
+              { status: 400 }
+            );
+          if (!newWalletId)
+            return NextResponse.json(
+              { error: "Escolha a carteira que recebeu o dinheiro — o valor precisa entrar no caixa." },
+              { status: 400 }
+            );
         }
-        if (creditCardId) {
-          const c = await db.creditCard.findUnique({ where: { id: creditCardId } });
-          if (c)
-            await db.creditCard.update({
-              where: { id: creditCardId },
-              data: { usedLimit: Math.max(0, Number(c.usedLimit) + amt) },
-            });
+
+        let transactionId = existing.transactionId ?? null;
+        const receivedAt = will ? (body.receivedAt ? new Date(body.receivedAt) : existing.receivedAt ?? new Date()) : null;
+
+        if (was && transactionId) {
+          // remove o lançamento antigo (estornando a carteira); recria abaixo com os valores novos
+          await removeLinkedTransaction(transactionId);
+          transactionId = null;
+        } else if (was && !transactionId) {
+          // registro antigo recebido sem vínculo: reconcilia a carteira direto
+          if (oldWalletId) await walletDelta(oldWalletId, -oldAmt);
         }
+        if (will) {
+          const t = await db.transaction.create({
+            data: {
+              type: "income",
+              category: finalDescription.startsWith("Mensalidade") ? "monthly" : "service",
+              description: finalDescription,
+              amount: newAmt,
+              date: receivedAt ?? new Date(),
+              paymentMethod: finalMethod,
+              walletId: newWalletId,
+              clientId: existing.clientId,
+              clientName: existing.clientName,
+              orderId: existing.orderId,
+            },
+          });
+          transactionId = t.id;
+        }
+
+        const data: any = { ...body };
+        data.received = will;
+        data.receivedAt = receivedAt;
+        data.walletId = newWalletId;
+        data.transactionId = transactionId;
+        if (body.amount !== undefined) data.amount = newAmt;
+        if (body.dueDate) data.dueDate = new Date(body.dueDate);
+        const updated = await db.receivable.update({ where: { id }, data, include: INCLUDES.receivables });
         return NextResponse.json({ data: updated });
       }
     }
 
-    // Receivable marking as received
-    if (resource === "receivables" && body.received === true) {
-      const existing = await db.receivable.findUnique({ where: { id } });
-      if (existing && !existing.received) {
-        const amt = Number(existing.amount);
-        const walletId = body.walletId || existing.walletId;
-        const updated = await db.receivable.update({
-          where: { id },
-          data: {
-            ...body,
-            received: true,
-            receivedAt: new Date(),
-            walletId,
-            ...(body.dueDate ? { dueDate: new Date(body.dueDate) } : {}),
-          },
-          include: INCLUDES.receivables,
-        });
-        if (walletId) {
-          const w = await db.wallet.findUnique({ where: { id: walletId } });
-          if (w)
-            await db.wallet.update({
-              where: { id: walletId },
-              data: { balance: Number(w.balance) + amt },
-            });
+    // ===== Pagável: pagar / estornar / editar — com lançamento vinculado em Entradas & Saídas =====
+    if (resource === "payables") {
+      const existing = await db.payable.findUnique({ where: { id } });
+      if (existing) {
+        const was = existing.paid;
+        const will = body.paid === undefined ? was : !!body.paid;
+        const oldAmt = Number(existing.amount);
+        const newAmt = body.amount !== undefined && body.amount !== "" ? Number(body.amount) : oldAmt;
+        const newWalletId = body.walletId !== undefined ? body.walletId || null : existing.walletId;
+        const newCardId = body.creditCardId !== undefined ? body.creditCardId || null : existing.creditCardId;
+        const finalDescription =
+          body.description !== undefined
+            ? String(body.description || "").trim() || existing.description
+            : existing.description;
+        const finalMethod = body.paymentMethod !== undefined ? body.paymentMethod || null : existing.paymentMethod;
+
+        if (!was && will) {
+          if (newAmt <= 0)
+            return NextResponse.json(
+              { error: "O valor precisa ser maior que zero para registrar o pagamento." },
+              { status: 400 }
+            );
+          if (!newWalletId && !newCardId)
+            return NextResponse.json(
+              { error: "Escolha a carteira (ou o cartão) que pagou — o dinheiro precisa sair de algum lugar." },
+              { status: 400 }
+            );
         }
+
+        let transactionId = existing.transactionId ?? null;
+        if (was && transactionId) {
+          await removeLinkedTransaction(transactionId);
+          transactionId = null;
+        } else if (was && !transactionId) {
+          // legado: estorna direto
+          if (existing.walletId) await walletDelta(existing.walletId, oldAmt);
+          if (existing.creditCardId) await cardDelta(existing.creditCardId, -oldAmt);
+        }
+        if (will) {
+          const knownCats = ["fixed", "variable", "other", "card_payment"];
+          const t = await db.transaction.create({
+            data: {
+              type: "expense",
+              category: existing.category && knownCats.includes(existing.category) ? existing.category : "other",
+              description: finalDescription,
+              amount: newAmt,
+              date: existing.paidAt ?? new Date(),
+              paymentMethod: finalMethod ?? (newCardId ? "credit" : null),
+              walletId: newWalletId,
+              creditCardId: newCardId,
+            },
+          });
+          transactionId = t.id;
+        }
+
+        const data: any = { ...body };
+        data.paid = will;
+        data.paidAt = will ? existing.paidAt ?? new Date() : null;
+        data.walletId = newWalletId;
+        data.creditCardId = newCardId;
+        data.transactionId = transactionId;
+        if (body.amount !== undefined) data.amount = newAmt;
+        const updated = await db.payable.update({ where: { id }, data, include: INCLUDES.payables });
         return NextResponse.json({ data: updated });
       }
     }
@@ -251,6 +367,49 @@ export async function DELETE(
     const model = getModel(resource);
     if (!model)
       return NextResponse.json({ error: "Recurso inválido" }, { status: 404 });
+
+    // Estorno automático ao excluir: apaga o lançamento vinculado (reverte carteira/cartão);
+    // registros antigos sem vínculo reconciliam direto.
+    if (resource === "receivables") {
+      const r = await db.receivable.findUnique({ where: { id } });
+      if (r?.received) {
+        if (r.transactionId) {
+          await removeLinkedTransaction(r.transactionId);
+        } else if (r.walletId) {
+          const w = await db.wallet.findUnique({ where: { id: r.walletId } });
+          if (w)
+            await db.wallet.update({
+              where: { id: r.walletId },
+              data: { balance: Number(w.balance) - Number(r.amount) },
+            });
+        }
+      }
+    }
+    if (resource === "payables") {
+      const p = await db.payable.findUnique({ where: { id } });
+      if (p?.paid) {
+        if (p.transactionId) {
+          await removeLinkedTransaction(p.transactionId);
+        } else {
+          if (p.walletId) {
+            const w = await db.wallet.findUnique({ where: { id: p.walletId } });
+            if (w)
+              await db.wallet.update({
+                where: { id: p.walletId },
+                data: { balance: Number(w.balance) + Number(p.amount) },
+              });
+          }
+          if (p.creditCardId) {
+            const c = await db.creditCard.findUnique({ where: { id: p.creditCardId } });
+            if (c)
+              await db.creditCard.update({
+                where: { id: p.creditCardId },
+                data: { usedLimit: Math.max(0, Number(c.usedLimit) - Number(p.amount)) },
+              });
+          }
+        }
+      }
+    }
 
     if (resource === "transactions") {
       const tx = await db.transaction.findUnique({ where: { id } });

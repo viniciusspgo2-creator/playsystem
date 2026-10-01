@@ -99,6 +99,8 @@ interface CreditCard {
 
 const CATEGORY_LABELS: Record<string, string> = {
   service: "Serviço",
+  unitv: "UNITV",
+  monthly: "Mensalidade",
   fixed: "Fixa",
   variable: "Variável",
   salary: "Salário",
@@ -127,6 +129,8 @@ const INSTALLMENT_OPTIONS = [
 
 const CATEGORY_OPTIONS = [
   { value: "service", label: "Serviço" },
+  { value: "unitv", label: "UNITV" },
+  { value: "monthly", label: "Mensalidade" },
   { value: "fixed", label: "Conta Fixa" },
   { value: "variable", label: "Despesa Variável" },
   { value: "salary", label: "Salário" },
@@ -140,6 +144,10 @@ function categoryBadgeClass(category: string): string {
   switch (category) {
     case "service":
       return "bg-accent-blue/15 text-accent-blue border-accent-blue/20";
+    case "unitv":
+      return "bg-fuchsia-500/15 text-fuchsia-600 dark:text-fuchsia-400 border-fuchsia-500/20";
+    case "monthly":
+      return "bg-teal-500/15 text-teal-600 dark:text-teal-400 border-teal-500/20";
     case "fixed":
       return "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20";
     case "variable":

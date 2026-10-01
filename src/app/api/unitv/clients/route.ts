@@ -39,6 +39,25 @@ export async function POST(req: NextRequest) {
     if (act) {
       const months = Math.max(1, parseInt(act.planMonths, 10) || 1);
       const amount = parseMoney(act.amount);
+      if (amount <= 0)
+        return NextResponse.json(
+          {
+            error:
+              "Informe o valor pago (maior que zero). Se ele ainda não pagou, cadastre sem registrar pagamento.",
+          },
+          { status: 400 }
+        );
+      if (!act.walletId)
+        return NextResponse.json(
+          { error: "Escolha a carteira que recebeu o pagamento — o valor precisa entrar no caixa." },
+          { status: 400 }
+        );
+      const wallet = await db.wallet.findUnique({ where: { id: String(act.walletId) } });
+      if (!wallet)
+        return NextResponse.json(
+          { error: "A carteira escolhida não existe mais. Atualize a página e tente de novo." },
+          { status: 400 }
+        );
       const paidAt = parseDateInput(act.paidAt || "") || todayBR();
       const expiry = parseDateInput(body.expiresAt || "") || computeNewExpiry(null, paidAt, months);
 

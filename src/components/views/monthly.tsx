@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { PageHeader, EmptyState, Card } from "@/components/ui-primitives/page-header";
 import { MetricCard } from "@/components/ui-primitives/metric-card";
-import { useFetch, apiPost, useRefresh } from "@/lib/api-hooks";
+import { useFetch, apiPost, apiDelete, useRefresh } from "@/lib/api-hooks";
 import { formatCurrency, formatNumber } from "@/lib/format";
 import {
   Repeat,
@@ -14,11 +14,23 @@ import {
   Loader2,
   CalendarDays,
   Check,
+  Undo2,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -49,6 +61,19 @@ interface Receivable {
   receivedAt?: string | Date | null;
 }
 
+interface WalletLite {
+  id: string;
+  name: string;
+}
+
+const PAYMENT_METHODS = [
+  { value: "pix", label: "Pix" },
+  { value: "card", label: "Cartão de Débito" },
+  { value: "cash", label: "Dinheiro" },
+  { value: "transfer", label: "Transferência" },
+  { value: "credit", label: "Crédito" },
+];
+
 const MONTH_NAMES_PT = [
   "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
   "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
@@ -72,7 +97,8 @@ function stringToHue(s: string): number {
 export function MonthlyView() {
   const refresh = useRefresh();
   const [filter, setFilter] = useState<FilterKey>("all");
-  const [markingId, setMarkingId] = useState<string | null>(null);
+  const [payFor, setPayFor] = useState<MonthlyClient | null>(null);
+  const [undoingId, setUndoingId] = useState<string | null>(null);
 
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -98,6 +124,44 @@ export function MonthlyView() {
 
   const { data: clients, loading: loadingClients } = useFetch<MonthlyClient[]>(clientsUrl);
   const { data: receivables, loading: loadingReceivables } = useFetch<Receivable[]>(receivablesUrl);
+  const { data: wallets } = useFetch<WalletLite[]>("/api/crud/wallets");
+
+  // Recebível do mês por cliente (para poder desfazer o "Marcar pago")
+  // Só considera a MENSALIDADE — não pega outros recebimentos do mesmo cliente (ex.: OS)
+  const paidReceivableByClient = useMemo(() => {
+    const map = new Map<string, Receivable>();
+    for (const r of receivables ?? []) {
+      if (!r.clientId || !r.description?.startsWith("Mensalidade")) continue;
+      const cur = map.get(r.clientId);
+      if (!cur || new Date(r.receivedAt ?? 0) > new Date(cur.receivedAt ?? 0)) map.set(r.clientId, r);
+    }
+    return map;
+  }, [receivables]);
+
+  async function unmarkPaid(client: MonthlyClient) {
+    const r = paidReceivableByClient.get(client.id);
+    if (!r) return;
+    if (
+      !confirm(
+        `Desmarcar o pagamento de ${client.name}? Os ${formatCurrency(
+          Number(r.amount)
+        )} saem da carteira e o mensalista volta para pendente.`
+      )
+    )
+      return;
+    setUndoingId(client.id);
+    try {
+      await apiDelete(`/api/crud/receivables/${r.id}`);
+      toast.success("Pagamento desmarcado", {
+        description: `${formatCurrency(Number(r.amount))} saíram do caixa — tudo reconciliado.`,
+      });
+      refresh();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setUndoingId(null);
+    }
+  }
 
   const safeClients = useMemo(() => clients ?? [], [clients]);
 
@@ -144,41 +208,6 @@ export function MonthlyView() {
       return list.filter((c) => !paidClientIds.has(c.id));
     return list;
   }, [safeClients, filter, paidClientIds]);
-
-  async function markPaid(client: MonthlyClient) {
-    setMarkingId(client.id);
-    try {
-      const today = new Date();
-      const dueDay = Number(client.monthlyDay ?? 1);
-      const dueDate = new Date(
-        today.getFullYear(),
-        today.getMonth(),
-        Math.min(dueDay, 28)
-      );
-      await apiPost("/api/crud/receivables", {
-        clientId: client.id,
-        description: `Mensalidade ${monthLabel} — ${client.name}`,
-        amount: Number(client.monthlyFee ?? 0),
-        dueDate: dueDate.toISOString(),
-        received: true,
-        receivedAt: today.toISOString(),
-        paymentMethod: "mensalista",
-        notes: "Recebimento registrado pela visão de Mensalistas.",
-      });
-      refresh();
-      toast.success("Pagamento registrado!", {
-        description: `${client.name} — ${formatCurrency(
-          Number(client.monthlyFee ?? 0)
-        )} adicionado aos recebíveis.`,
-      });
-    } catch (e: any) {
-      toast.error("Erro ao registrar pagamento", {
-        description: e.message,
-      });
-    } finally {
-      setMarkingId(null);
-    }
-  }
 
   const loading = loadingClients || loadingReceivables;
 
@@ -373,21 +402,28 @@ export function MonthlyView() {
                       </TableCell>
                       <TableCell className="text-right">
                         {isPaid ? (
-                          <span className="text-xs text-muted-foreground italic">
-                            Registrado em {monthLabel}
-                          </span>
+                          <div className="inline-flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground italic">
+                              Registrado em {monthLabel}
+                            </span>
+                            <Button
+                              size="icon"
+                              variant="outline"
+                              className="h-7 w-7"
+                              title="Desmarcar pagamento (estorna do caixa)"
+                              onClick={() => unmarkPaid(c)}
+                              disabled={undoingId === c.id}
+                            >
+                              {undoingId === c.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Undo2 className="h-3.5 w-3.5" />
+                              )}
+                            </Button>
+                          </div>
                         ) : (
-                          <Button
-                            size="sm"
-                            onClick={() => markPaid(c)}
-                            disabled={markingId === c.id}
-                            className="h-8"
-                          >
-                            {markingId === c.id ? (
-                              <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                            ) : (
-                              <Check className="h-3.5 w-3.5 mr-1.5" />
-                            )}
+                          <Button size="sm" onClick={() => setPayFor(c)} className="h-8">
+                            <Check className="h-3.5 w-3.5 mr-1.5" />
                             Marcar pago
                           </Button>
                         )}
@@ -454,18 +490,24 @@ export function MonthlyView() {
                       )}
                     </div>
                   </div>
-                  {!isPaid && (
+                  {isPaid ? (
                     <Button
                       size="sm"
-                      onClick={() => markPaid(c)}
-                      disabled={markingId === c.id}
+                      variant="outline"
+                      onClick={() => unmarkPaid(c)}
+                      disabled={undoingId === c.id}
                       className="w-full mt-3 h-9"
                     >
-                      {markingId === c.id ? (
+                      {undoingId === c.id ? (
                         <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
                       ) : (
-                        <Check className="h-3.5 w-3.5 mr-1.5" />
+                        <Undo2 className="h-3.5 w-3.5 mr-1.5" />
                       )}
+                      Desmarcar pagamento
+                    </Button>
+                  ) : (
+                    <Button size="sm" onClick={() => setPayFor(c)} className="w-full mt-3 h-9">
+                      <Check className="h-3.5 w-3.5 mr-1.5" />
                       Marcar como pago
                     </Button>
                   )}
@@ -494,11 +536,185 @@ export function MonthlyView() {
             <p className="text-xs text-muted-foreground mt-0.5">
               {formatCurrency(summary.pendingRevenue)} em receita a receber. Use o
               botão <span className="font-medium text-foreground">“Marcar pago”</span>{" "}
-              para registrar pagamentos rapidamente.
+              para registrar o pagamento e o valor cai direto na carteira.
             </p>
           </div>
         </motion.div>
       )}
+
+      {payFor && (
+        <MarkPaidDialog
+          client={payFor}
+          wallets={wallets ?? []}
+          monthLabel={monthLabel}
+          onClose={() => setPayFor(null)}
+        />
+      )}
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Marcar pago: carteira obrigatória + lançamento no caixa             */
+/* ------------------------------------------------------------------ */
+
+function parseMoneyBR(v: string): number {
+  let s = String(v).replace(/[^\d,.-]/g, "");
+  if (s.includes(",")) s = s.replace(/\./g, "").replace(",", ".");
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function MarkPaidDialog({
+  client,
+  wallets,
+  monthLabel,
+  onClose,
+}: {
+  client: MonthlyClient;
+  wallets: WalletLite[];
+  monthLabel: string;
+  onClose: () => void;
+}) {
+  const refresh = useRefresh();
+  const fee = Number(client.monthlyFee ?? 0);
+  const [amount, setAmount] = useState(fee > 0 ? String(fee).replace(".", ",") : "");
+  const [paidAt, setPaidAt] = useState(new Date().toISOString().slice(0, 10));
+  const [walletId, setWalletId] = useState(wallets[0]?.id ?? "");
+  const [method, setMethod] = useState("pix");
+  const [loading, setLoading] = useState(false);
+
+  const walletName = wallets.find((w) => w.id === walletId)?.name;
+
+  async function save() {
+    const amt = parseMoneyBR(amount);
+    if (amt <= 0) return toast.error("Informe o valor recebido (maior que zero).");
+    if (wallets.length === 0)
+      return toast.error(
+        "Você ainda não tem carteiras. Crie uma na aba Carteiras para o dinheiro entrar no caixa."
+      );
+    if (!walletId)
+      return toast.error("Escolha a carteira que recebeu o dinheiro — o valor precisa entrar no caixa.");
+    setLoading(true);
+    try {
+      const today = new Date();
+      const dueDay = Number(client.monthlyDay ?? 1);
+      const dueDate = new Date(today.getFullYear(), today.getMonth(), Math.min(dueDay, 28));
+      await apiPost("/api/crud/receivables", {
+        clientId: client.id,
+        description: `Mensalidade ${monthLabel} — ${client.name}`,
+        amount: amt,
+        dueDate: dueDate.toISOString(),
+        received: true,
+        receivedAt: new Date(`${paidAt}T12:00:00`).toISOString(),
+        paymentMethod: method,
+        walletId,
+        notes: "Recebimento registrado pela visão de Mensalistas.",
+      });
+      toast.success(`${client.name} pagou • ${formatCurrency(amt)} no caixa`, {
+        description: walletName
+          ? `Entrada lançada na carteira ${walletName} e em Entradas & Saídas (Mensalidade).`
+          : "Entrada lançada no caixa.",
+      });
+      refresh();
+      onClose();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Marcar pago — {client.name}</DialogTitle>
+          <DialogDescription>
+            Mensalidade de {monthLabel} • vence dia{" "}
+            {String(Number(client.monthlyDay ?? 1)).padStart(2, "0")}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-1">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Valor recebido (R$)</Label>
+              <Input
+                inputMode="decimal"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="h-10"
+                placeholder="500,00"
+                autoFocus
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Data do pagamento</Label>
+              <Input type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} className="h-10" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Carteira que recebeu</Label>
+              <Select value={walletId || "__none__"} onValueChange={(v) => setWalletId(v === "__none__" ? "" : v)}>
+                <SelectTrigger className="h-10">
+                  <SelectValue placeholder="Nenhuma" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">— Nenhuma —</SelectItem>
+                  {wallets.map((w) => (
+                    <SelectItem key={w.id} value={w.id}>
+                      {w.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Forma de pagamento</Label>
+              <Select value={method} onValueChange={setMethod}>
+                <SelectTrigger className="h-10">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PAYMENT_METHODS.map((m) => (
+                    <SelectItem key={m.value} value={m.value}>
+                      {m.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {parseMoneyBR(amount) > 0 && (
+            <div className="flex items-start gap-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5">
+              <Wallet className="h-4 w-4 mt-0.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <div className="text-sm min-w-0">
+                <p className="font-semibold text-emerald-700 dark:text-emerald-300">
+                  Entrada de {formatCurrency(parseMoneyBR(amount))} no caixa
+                </p>
+                <p className="text-xs text-emerald-700/80 dark:text-emerald-400/80">
+                  {walletName ? `Carteira ${walletName}` : "escolha a carteira"} • vira lançamento
+                  "Mensalidade" em Entradas & Saídas
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={onClose} disabled={loading}>
+            Cancelar
+          </Button>
+          <Button onClick={save} disabled={loading}>
+            {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+            Confirmar {parseMoneyBR(amount) > 0 ? formatCurrency(parseMoneyBR(amount)) : "pagamento"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

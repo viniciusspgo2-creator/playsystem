@@ -79,6 +79,21 @@ export async function POST(
       // Contas a receber podem ser de clientes cadastrados OU de pessoa avulsa (nome livre)
       // Vínculos inválidos (ordem/carteira/cliente inexistente) são descartados sem travar o fluxo
       await sanitizeForeignKeys(resource, body);
+      const willReceive = body.received === true;
+      const amt = Number(body.amount) || 0;
+      if (willReceive) {
+        // Regra de ouro: dinheiro recebido precisa entrar numa carteira
+        if (amt <= 0)
+          return NextResponse.json(
+            { error: "O valor precisa ser maior que zero para registrar o recebimento." },
+            { status: 400 }
+          );
+        if (!body.walletId)
+          return NextResponse.json(
+            { error: "Escolha a carteira que recebeu o dinheiro — o valor precisa entrar no caixa." },
+            { status: 400 }
+          );
+      }
       const item = await model.create({
         data: {
           ...body,
@@ -88,11 +103,106 @@ export async function POST(
           orderId: body.orderId || null,
           paymentMethod: body.paymentMethod || null,
           notes: body.notes || null,
-          amount: Number(body.amount) || 0,
+          amount: amt,
           ...(body.dueDate ? { dueDate: new Date(body.dueDate) } : {}),
         },
         include: INCLUDES[resource],
       });
+      if (willReceive) {
+        // Lançamento vinculado em Entradas & Saídas (a carteira se move junto)
+        const t = await db.transaction.create({
+          data: {
+            type: "income",
+            category: String(item.description || "").startsWith("Mensalidade") ? "monthly" : "service",
+            description: item.description,
+            amount: amt,
+            date: item.receivedAt ?? new Date(),
+            paymentMethod: item.paymentMethod,
+            walletId: item.walletId,
+            clientId: item.clientId,
+            clientName: item.clientName,
+            orderId: item.orderId,
+          },
+        });
+        if (item.walletId) {
+          const w = await db.wallet.findUnique({ where: { id: item.walletId } });
+          if (w)
+            await db.wallet.update({
+              where: { id: item.walletId },
+              data: { balance: Number(w.balance) + amt },
+            });
+        }
+        const linked = await db.receivable.update({ where: { id: item.id }, data: { transactionId: t.id }, include: INCLUDES[resource] });
+        return NextResponse.json({ data: linked });
+      }
+      return NextResponse.json({ data: item });
+    }
+    if (resource === "payables") {
+      await sanitizeForeignKeys(resource, body);
+      const willPay = body.paid === true;
+      const amt = Number(body.amount) || 0;
+      if (willPay) {
+        if (amt <= 0)
+          return NextResponse.json(
+            { error: "O valor precisa ser maior que zero para registrar o pagamento." },
+            { status: 400 }
+          );
+        if (!body.walletId && !body.creditCardId)
+          return NextResponse.json(
+            { error: "Escolha a carteira (ou o cartão) que pagou — o dinheiro precisa sair de algum lugar." },
+            { status: 400 }
+          );
+      }
+      const item = await model.create({
+        data: {
+          ...body,
+          walletId: body.walletId || null,
+          creditCardId: body.creditCardId || null,
+          paymentMethod: body.paymentMethod || null,
+          category: body.category || null,
+          supplier: body.supplier || null,
+          notes: body.notes || null,
+          amount: amt,
+          paid: willPay,
+          ...(willPay ? { paidAt: new Date() } : {}),
+          ...(body.dueDate ? { dueDate: new Date(body.dueDate) } : {}),
+        },
+        include: INCLUDES[resource],
+      });
+      if (willPay) {
+        // Lançamento vinculado em Entradas & Saídas (carteira/cartão se movem junto)
+        const knownCats = ["fixed", "variable", "other", "card_payment"];
+        const t = await db.transaction.create({
+          data: {
+            type: "expense",
+            category: body.category && knownCats.includes(body.category) ? body.category : "other",
+            description: item.description,
+            amount: amt,
+            date: item.paidAt ?? new Date(),
+            paymentMethod: item.paymentMethod ?? (item.creditCardId ? "credit" : null),
+            walletId: item.walletId,
+            creditCardId: item.creditCardId,
+          },
+        });
+        if (item.walletId) {
+          const w = await db.wallet.findUnique({ where: { id: item.walletId } });
+          if (w)
+            await db.wallet.update({
+              where: { id: item.walletId },
+              data: { balance: Number(w.balance) - amt },
+            });
+        }
+        if (item.creditCardId) {
+          const c = await db.creditCard.findUnique({ where: { id: item.creditCardId } });
+          if (c)
+            await db.creditCard.update({
+              where: { id: item.creditCardId },
+              data: { usedLimit: Math.max(0, Number(c.usedLimit) + amt) },
+            });
+        }
+        const linked = await db.payable.update({ where: { id: item.id }, data: { transactionId: t.id }, include: INCLUDES[resource] });
+        return NextResponse.json({ data: linked });
+      }
       return NextResponse.json({ data: item });
     }
     if (resource === "orders") {
