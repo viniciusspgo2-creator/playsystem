@@ -49,6 +49,13 @@ export async function PUT(
 
     // Transaction edit: reconcile wallet / credit card balances so "editar lançamento" never desynca saldos
     if (resource === "transactions") {
+      // uma parcela não pode ser "re-parcelada" por edit: mantém o grupo original
+      delete body.installments;
+      delete body.installmentNo;
+      delete body.installmentGroup;
+      if (body.amount !== undefined && body.amount !== "" && Number(body.amount) <= 0) {
+        return NextResponse.json({ error: "O valor precisa ser maior que zero." }, { status: 400 });
+      }
       const existing = await db.transaction.findUnique({ where: { id } });
       if (existing) {
         const oldAmt = Number(existing.amount);

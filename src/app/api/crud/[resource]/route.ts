@@ -150,9 +150,32 @@ export async function POST(
   }
 }
 
-// Helper: create transaction and update wallet/credit card balances
+// Helper: soma N meses a uma data, ajustando o dia quando o mês destino é mais curto
+// (ex: 31 jan + 1 mês → 28/29 fev, nunca "pula" para março)
+function addMonths(date: Date, months: number): Date {
+  const d = new Date(date.getTime());
+  const day = d.getDate();
+  d.setDate(1);
+  d.setMonth(d.getMonth() + months);
+  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  d.setDate(Math.min(day, lastDay));
+  return d;
+}
+
+// Helper: create transaction and update wallet/credit card balances.
+// Se for despesa no cartão de crédito com parcelamento (installments > 1),
+// cria N lançamentos mensais (1 por mês) agrupados por installmentGroup:
+// - cada parcela tem o mesmo dia da compra, meses seguintes
+// - o limite do cartão é consumido pelo valor TOTAL na hora (padrão dos bancos)
+// - o saldo da carteira não é afetado (só quando a fatura for paga)
 async function createTransaction(body: any) {
-  const { type, category, description, amount, date, paymentMethod } = body;
+  const { type, category, description } = body;
+
+  // Validações humanas antes de tocar no banco (nada de erro críptico)
+  if (type !== "income" && type !== "expense")
+    return NextResponse.json({ error: "Escolha se é entrada ou saída." }, { status: 400 });
+  if (!description || !String(description).trim())
+    return NextResponse.json({ error: "Escreva uma descrição para o lançamento." }, { status: 400 });
 
   // Valida vínculos ANTES de usar: "" / id inexistente → null (nunca explode FK)
   await sanitizeForeignKeys("transactions", body);
@@ -164,15 +187,77 @@ async function createTransaction(body: any) {
     orderId,
   } = body;
 
-  const amt = Number(amount) || 0;
+  const amt = Number(body.amount) || 0;
+  if (amt <= 0)
+    return NextResponse.json({ error: "Informe um valor maior que zero." }, { status: 400 });
+
+  const when = body.date ? new Date(body.date) : new Date();
+  if (isNaN(when.getTime()))
+    return NextResponse.json({ error: "Data inválida." }, { status: 400 });
+
+  // ===== Compra parcelada no cartão de crédito =====
+  let installments = Math.floor(Number(body.installments) || 1);
+  if (installments < 1) installments = 1;
+  if (installments > 24) installments = 24;
+  const isInstallment = installments > 1 && type === "expense" && !!creditCardId;
+
+  if (isInstallment) {
+    // divide em centavos para não perder dinheiro no arredondamento;
+    // a sobra de centavos vai para a 1ª parcela (ex: R$ 100 em 3x = 33.33 + 33.33 + 33.34)
+    const totalCents = Math.round(amt * 100);
+    const base = Math.floor(totalCents / installments);
+    const remainder = totalCents - base * installments;
+    const group = `inst_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
+    const created: any[] = [];
+    for (let i = 1; i <= installments; i++) {
+      const cents = base + (i === 1 ? remainder : 0);
+      const tx = await db.transaction.create({
+        data: {
+          type,
+          category,
+          description,
+          amount: cents / 100,
+          date: addMonths(when, i - 1),
+          paymentMethod: body.paymentMethod ?? "credit",
+          walletId: null, // compra no crédito não sai do saldo; sai quando pagar a fatura
+          creditCardId: creditCardId || null,
+          clientId: clientId || null,
+          clientName: clientName || null,
+          orderId: orderId || null,
+          installments,
+          installmentNo: i,
+          installmentGroup: group,
+        },
+        include: INCLUDES.transactions,
+      });
+      created.push(tx);
+    }
+
+    // limite usado recebe o valor total da compra imediatamente
+    const card = await db.creditCard.findUnique({ where: { id: creditCardId } });
+    if (card) {
+      await db.creditCard.update({
+        where: { id: creditCardId },
+        data: { usedLimit: Math.max(0, Number(card.usedLimit) + amt) },
+      });
+    }
+
+    return NextResponse.json({
+      data: created[0],
+      meta: { installments, created: created.length, total: amt },
+    });
+  }
+
+  // ===== Lançamento simples =====
   const tx = await db.transaction.create({
     data: {
       type,
       category,
-      description,
+      description: String(description).trim(),
       amount: amt,
-      date: date ? new Date(date) : new Date(),
-      paymentMethod,
+      date: when,
+      paymentMethod: body.paymentMethod || null,
       walletId: walletId || null,
       creditCardId: creditCardId || null,
       clientId: clientId || null,

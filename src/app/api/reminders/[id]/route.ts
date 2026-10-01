@@ -26,7 +26,7 @@ export async function PATCH(
         data: { done: true, doneAt: new Date() },
       });
 
-      let next = null;
+      let next: any = null;
       if (existing.repeat && existing.repeat !== "none") {
         const now = new Date();
         let base = existing.dueDate ? new Date(existing.dueDate) : new Date();

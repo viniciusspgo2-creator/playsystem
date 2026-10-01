@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import { MetricCard } from "@/components/ui-primitives/metric-card";
 import { PageHeader, Card, EmptyState } from "@/components/ui-primitives/page-header";
 import { FormModal, type Field } from "@/components/ui-primitives/form-modal";
-import { useFetch } from "@/lib/api-hooks";
+import { useFetch, apiPost, useRefresh } from "@/lib/api-hooks";
 import { formatCurrency } from "@/lib/format";
 import {
   Wallet as WalletIcon,
@@ -16,10 +16,31 @@ import {
   Banknote,
   Pencil,
   CheckCircle2,
+  ArrowUpCircle,
+  ReceiptText,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 interface Wallet {
@@ -53,12 +74,115 @@ const TYPE_META: Record<string, { label: string; icon: React.ReactNode; bg: stri
   cash: { label: "Dinheiro", icon: <Banknote className="h-3 w-3" />, bg: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" },
 };
 
+const PAYMENT_METHODS = [
+  { value: "pix", label: "Pix" },
+  { value: "card", label: "Cartão de Débito" },
+  { value: "cash", label: "Dinheiro" },
+  { value: "transfer", label: "Transferência" },
+];
+
+// valor de data/hora para input datetime-local (hora local)
+function nowLocalInput(): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const d = new Date();
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 export function WalletsView() {
   const { data: walletsData, loading: wl } = useFetch<Wallet[]>("/api/crud/wallets");
   const { data: cardsData, loading: cl } = useFetch<CreditCard[]>("/api/crud/credit-cards");
 
   const [walletModal, setWalletModal] = useState<{ open: boolean; id?: string; data?: Partial<Wallet> }>({ open: false });
   const [cardModal, setCardModal] = useState<{ open: boolean; id?: string; data?: Partial<CreditCard> }>({ open: false });
+  const refresh = useRefresh();
+
+  // ===== Adicionar saldo na carteira (grana extra / retroativo) =====
+  const [depositModal, setDepositModal] = useState<{ open: boolean; wallet?: Wallet }>({ open: false });
+  const [depAmount, setDepAmount] = useState("");
+  const [depDate, setDepDate] = useState("");
+  const [depDesc, setDepDesc] = useState("");
+  const [depLoading, setDepLoading] = useState(false);
+
+  // ===== Pagar fatura do cartão =====
+  const [invoiceModal, setInvoiceModal] = useState<{ open: boolean; card?: CreditCard }>({ open: false });
+  const [invAmount, setInvAmount] = useState("");
+  const [invWallet, setInvWallet] = useState("");
+  const [invMethod, setInvMethod] = useState("pix");
+  const [invDate, setInvDate] = useState("");
+  const [invLoading, setInvLoading] = useState(false);
+
+  function openDeposit(w: Wallet) {
+    setDepositModal({ open: true, wallet: w });
+    setDepAmount("");
+    setDepDate(nowLocalInput());
+    setDepDesc("");
+  }
+
+  function openInvoice(c: CreditCard) {
+    setInvoiceModal({ open: true, card: c });
+    setInvAmount(Number(c.usedLimit) > 0 ? String(Number(c.usedLimit)) : "");
+    setInvWallet(c.walletId ?? "");
+    setInvMethod("pix");
+    setInvDate(nowLocalInput());
+  }
+
+  async function submitDeposit() {
+    const w = depositModal.wallet;
+    if (!w) return;
+    const amt = Number(depAmount);
+    if (!amt || amt <= 0) {
+      toast.error("Informe um valor maior que zero.");
+      return;
+    }
+    setDepLoading(true);
+    try {
+      await apiPost("/api/crud/transactions", {
+        type: "income",
+        category: "deposit",
+        description: depDesc.trim() || "Saldo adicionado — grana extra",
+        amount: amt,
+        date: depDate ? new Date(depDate) : new Date(),
+        walletId: w.id,
+      });
+      toast.success(`+ ${formatCurrency(amt)} em ${w.name}!`);
+      refresh();
+      setDepositModal({ open: false });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setDepLoading(false);
+    }
+  }
+
+  async function submitInvoice() {
+    const c = invoiceModal.card;
+    if (!c) return;
+    const amt = Number(invAmount);
+    if (!amt || amt <= 0) {
+      toast.error("Informe o valor que está pagando.");
+      return;
+    }
+    if (!invWallet) {
+      toast.error("Escolha a carteira de onde o dinheiro sai.");
+      return;
+    }
+    setInvLoading(true);
+    try {
+      await apiPost(`/api/credit-cards/${c.id}/pay-invoice`, {
+        amount: amt,
+        walletId: invWallet,
+        date: invDate ? new Date(invDate) : new Date(),
+        paymentMethod: invMethod,
+      });
+      toast.success(`Fatura do ${c.name} paga: ${formatCurrency(amt)}`);
+      refresh();
+      setInvoiceModal({ open: false });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setInvLoading(false);
+    }
+  }
 
   const wallets = walletsData || [];
   const cards = cardsData || [];
@@ -217,6 +341,11 @@ export function WalletsView() {
                       <span>{w._count?.transactions ?? 0} transações</span>
                       {!w.active && <Badge variant="secondary" className="bg-muted text-muted-foreground">Inativa</Badge>}
                     </div>
+                    <div className="mt-3">
+                      <Button variant="outline" size="sm" className="w-full" onClick={() => openDeposit(w)}>
+                        <Plus className="h-4 w-4 mr-1.5" /> Adicionar Saldo
+                      </Button>
+                    </div>
                   </Card>
                 </motion.div>
               );
@@ -334,9 +463,20 @@ export function WalletsView() {
                             <CheckCircle2 className="h-3 w-3" /> Ativo
                           </span>
                         )}
-                        <Button variant="ghost" size="sm" onClick={() => setCardModal({ open: true, id: c.id, data: c })}>
-                          <Pencil className="h-3.5 w-3.5 mr-1" /> Editar
-                        </Button>
+                        <div className="flex items-center gap-1.5">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openInvoice(c)}
+                            disabled={used <= 0}
+                            title={used <= 0 ? "Nada em aberto neste cartão" : "Registrar pagamento da fatura"}
+                          >
+                            <ReceiptText className="h-3.5 w-3.5 mr-1" /> Pagar Fatura
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => setCardModal({ open: true, id: c.id, data: c })}>
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   </Card>
@@ -394,6 +534,170 @@ export function WalletsView() {
         endpoint="/api/crud/credit-cards"
         id={cardModal.id}
       />
+
+      {/* Adicionar Saldo */}
+      <Dialog open={depositModal.open} onOpenChange={(v) => setDepositModal((p) => ({ ...p, open: v }))}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowUpCircle className="h-5 w-5 text-emerald-500" />
+              Adicionar Saldo{depositModal.wallet ? ` — ${depositModal.wallet.name}` : ""}
+            </DialogTitle>
+            <DialogDescription>
+              Cria um lançamento de entrada nesta carteira. Ganhou uma grana extra ou esqueceu de
+              lançar dinheiro do mês passado? É só colocar a data certa.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label className="block mb-1.5 text-xs font-medium">
+                Valor (R$) <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                type="number"
+                step="0.01"
+                placeholder="0.00"
+                value={depAmount}
+                onChange={(e) => setDepAmount(e.target.value)}
+                className="h-10"
+              />
+            </div>
+            <div>
+              <Label className="block mb-1.5 text-xs font-medium">Data</Label>
+              <Input
+                type="datetime-local"
+                value={depDate}
+                onChange={(e) => setDepDate(e.target.value)}
+                className="h-10"
+              />
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Pode ser no passado — ex: aquela grana que você recebeu no mês passado.
+              </p>
+            </div>
+            <div>
+              <Label className="block mb-1.5 text-xs font-medium">Descrição</Label>
+              <Input
+                placeholder="Ex: freela extra, venda antiga, presente..."
+                value={depDesc}
+                onChange={(e) => setDepDesc(e.target.value)}
+                className="h-10"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setDepositModal({ open: false })} disabled={depLoading}>
+              Cancelar
+            </Button>
+            <Button onClick={submitDeposit} disabled={depLoading}>
+              {depLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Adicionar{depAmount && Number(depAmount) > 0 ? ` ${formatCurrency(Number(depAmount))}` : ""}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Pagar Fatura */}
+      <Dialog open={invoiceModal.open} onOpenChange={(v) => setInvoiceModal((p) => ({ ...p, open: v }))}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ReceiptText className="h-5 w-5 text-violet-500" />
+              Pagar Fatura{invoiceModal.card ? ` — ${invoiceModal.card.name}` : ""}
+            </DialogTitle>
+            <DialogDescription>
+              O valor sai da carteira escolhida e o limite usado do cartão é liberado. Dá para
+              pagar o total ou só uma parte.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="rounded-xl border border-border/60 bg-muted/40 p-3 text-sm flex items-center justify-between">
+              <span className="text-muted-foreground">Em aberto no cartão</span>
+              <span className="font-semibold tabular-nums">
+                {formatCurrency(Number(invoiceModal.card?.usedLimit) || 0)}
+              </span>
+            </div>
+            <div>
+              <Label className="block mb-1.5 text-xs font-medium">
+                Valor a pagar (R$) <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                type="number"
+                step="0.01"
+                placeholder="0.00"
+                value={invAmount}
+                onChange={(e) => setInvAmount(e.target.value)}
+                className="h-10"
+              />
+              <div className="mt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setInvAmount(String(Number(invoiceModal.card?.usedLimit) || 0))}
+                >
+                  Pagar o total em aberto
+                </Button>
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Compra parcelada? Pague o valor do mês no app do banco e lance aqui só essa parte —
+                o limite vai liberando conforme você paga.
+              </p>
+            </div>
+            <div>
+              <Label className="block mb-1.5 text-xs font-medium">
+                Sair de qual carteira? <span className="text-destructive">*</span>
+              </Label>
+              <Select value={invWallet || undefined} onValueChange={setInvWallet}>
+                <SelectTrigger className="h-10">
+                  <SelectValue placeholder="Escolha a carteira..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {wallets.map((w) => (
+                    <SelectItem key={w.id} value={w.id}>
+                      {w.name} — {formatCurrency(w.balance)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="block mb-1.5 text-xs font-medium">Data</Label>
+                <Input
+                  type="datetime-local"
+                  value={invDate}
+                  onChange={(e) => setInvDate(e.target.value)}
+                  className="h-10"
+                />
+              </div>
+              <div>
+                <Label className="block mb-1.5 text-xs font-medium">Forma</Label>
+                <Select value={invMethod} onValueChange={setInvMethod}>
+                  <SelectTrigger className="h-10">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PAYMENT_METHODS.map((m) => (
+                      <SelectItem key={m.value} value={m.value}>
+                        {m.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setInvoiceModal({ open: false })} disabled={invLoading}>
+              Cancelar
+            </Button>
+            <Button onClick={submitInvoice} disabled={invLoading}>
+              {invLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Pagar{invAmount && Number(invAmount) > 0 ? ` ${formatCurrency(Number(invAmount))}` : ""}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

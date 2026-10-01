@@ -23,11 +23,11 @@ import { Loader2 } from "lucide-react";
 import { PersonPicker } from "@/components/ui-primitives/person-picker";
 
 export type Field =
-  | { name: string; label: string; type: "text" | "number" | "date" | "datetime-local" | "textarea" | "email" | "tel" | "color"; placeholder?: string; required?: boolean; step?: string; default?: any }
-  | { name: string; label: string; type: "select"; options: { value: string; label: string }[]; placeholder?: string; required?: boolean; default?: any }
-  | { name: string; label: string; type: "person"; options: { value: string; label: string }[]; placeholder?: string; required?: boolean; default?: any; idField?: string; nameField?: string; hint?: string; loadingOptions?: boolean }
-  | { name: string; label: string; type: "switch"; default?: boolean }
-  | { name: string; label: string; type: "checkbox"; default?: boolean };
+  | { name: string; label: string; type: "text" | "number" | "date" | "datetime-local" | "textarea" | "email" | "tel" | "color"; placeholder?: string; required?: boolean; step?: string; default?: any; visible?: (values: Record<string, any>) => boolean; hint?: string }
+  | { name: string; label: string; type: "select"; options: { value: string; label: string }[]; placeholder?: string; required?: boolean; default?: any; visible?: (values: Record<string, any>) => boolean; hint?: string }
+  | { name: string; label: string; type: "person"; options: { value: string; label: string }[]; placeholder?: string; required?: boolean; default?: any; idField?: string; nameField?: string; hint?: string; loadingOptions?: boolean; visible?: (values: Record<string, any>) => boolean }
+  | { name: string; label: string; type: "switch"; default?: boolean; visible?: (values: Record<string, any>) => boolean; hint?: string }
+  | { name: string; label: string; type: "checkbox"; default?: boolean; visible?: (values: Record<string, any>) => boolean; hint?: string };
 
 interface FormModalProps {
   open: boolean;
@@ -39,6 +39,8 @@ interface FormModalProps {
   endpoint: string; // e.g. "/api/crud/clients"
   id?: string; // if provided, PUT; else POST
   onSaved?: () => void;
+  // mensagem de sucesso dinâmica na criação (ex: "12 lançamentos criados")
+  successMessage?: (values: Record<string, any>) => string;
 }
 
 // Converte Date/ISO para o formato aceito por inputs de data (hora local)
@@ -101,6 +103,7 @@ export function FormModal({
   endpoint,
   id,
   onSaved,
+  successMessage,
 }: FormModalProps) {
   const [values, setValues] = useState<Record<string, any>>(() =>
     buildInitial(fields, initialData)
@@ -129,6 +132,19 @@ export function FormModal({
       const body: Record<string, any> = { ...values };
       // convert numbers and empty optionals to null
       for (const f of fields) {
+        // campo invisível pela condição atual NÃO vai para o servidor
+        if ((f as any).visible && !(f as any).visible(values)) {
+          if (f.type === "person") {
+            const idF = (f as any).idField || "clientId";
+            const nameF = (f as any).nameField || "clientName";
+            delete body[f.name];
+            delete body[idF];
+            delete body[nameF];
+          } else {
+            delete body[f.name];
+          }
+          continue;
+        }
         if (f.type === "person") {
           // o picker escreve direto nos campos idField/nameField; o campo em si é só visual
           delete body[f.name];
@@ -158,7 +174,7 @@ export function FormModal({
         toast.success("Atualizado com sucesso!");
       } else {
         await apiPost(endpoint, body);
-        toast.success("Criado com sucesso!");
+        toast.success(successMessage ? successMessage(body) : "Criado com sucesso!");
       }
       refresh();
       onOpenChange(false);
@@ -194,10 +210,11 @@ export function FormModal({
           {description && <DialogDescription>{description}</DialogDescription>}
         </DialogHeader>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
-          {fields.map((f) => (
+          {fields.filter((f) => !(f as any).visible || (f as any).visible(values)).map((f) => (
             <div
               key={f.name}
               className={f.type === "textarea" || f.type === "switch" || f.type === "checkbox" || f.type === "person" ? "sm:col-span-2" : ""}
+              data-field={f.name}
             >
               {f.type !== "switch" && f.type !== "checkbox" && (
                 <Label htmlFor={f.name} className="block mb-1.5 text-xs font-medium">
@@ -284,6 +301,9 @@ export function FormModal({
                   <Label htmlFor={f.name} className="text-sm">{f.label}</Label>
                 </div>
               ) : null}
+              {(f as any).hint && f.type !== "person" && (
+                <p className="text-[10px] text-muted-foreground mt-1">{(f as any).hint}</p>
+              )}
             </div>
           ))}
         </div>

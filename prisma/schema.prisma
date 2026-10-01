@@ -118,6 +118,10 @@ model Transaction {
   clientName    String?  // nome livre (cliente/fornecedor avulso, sem cadastro)
   orderId       String?
   recurring     Boolean   @default(false)
+  // Compra parcelada no cartão: gera N lançamentos mensais (1 por mês)
+  installments     Int?     // total de parcelas (null/1 = à vista)
+  installmentNo    Int?     // número da parcela (1..N)
+  installmentGroup String?  // id que agrupa as parcelas da mesma compra
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -129,6 +133,7 @@ model Transaction {
   @@index([type])
   @@index([date])
   @@index([walletId])
+  @@index([installmentGroup])
 }
 
 // ============================================================

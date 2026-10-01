@@ -22,6 +22,7 @@ import {
   Scale,
   Pencil,
   Wallet as WalletIcon,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -63,6 +64,9 @@ interface Tx {
   clientName?: string | null;
   orderId?: string | null;
   recurring?: boolean;
+  installments?: number | null;
+  installmentNo?: number | null;
+  installmentGroup?: string | null;
   client?: { id: string; name: string } | null;
   order?: { id: string; title: string; number: string } | null;
   wallet?: { id: string; name: string } | null;
@@ -99,6 +103,8 @@ const CATEGORY_LABELS: Record<string, string> = {
   variable: "Variável",
   salary: "Salário",
   investment: "Investimento",
+  deposit: "Aporte de Saldo",
+  card_payment: "Fatura de Cartão",
   other: "Outro",
 };
 
@@ -108,6 +114,26 @@ const PAYMENT_METHODS = [
   { value: "cash", label: "Dinheiro" },
   { value: "transfer", label: "Transferência" },
   { value: "credit", label: "Crédito" },
+];
+
+// opções de parcelamento: à vista + 2..24x
+const INSTALLMENT_OPTIONS = [
+  { value: "1", label: "À vista (1x)" },
+  ...Array.from({ length: 23 }, (_, i) => ({
+    value: String(i + 2),
+    label: `${i + 2}x`,
+  })),
+];
+
+const CATEGORY_OPTIONS = [
+  { value: "service", label: "Serviço" },
+  { value: "fixed", label: "Conta Fixa" },
+  { value: "variable", label: "Despesa Variável" },
+  { value: "salary", label: "Salário" },
+  { value: "investment", label: "Investimento" },
+  { value: "deposit", label: "Aporte de Saldo" },
+  { value: "card_payment", label: "Fatura de Cartão" },
+  { value: "other", label: "Outro" },
 ];
 
 function categoryBadgeClass(category: string): string {
@@ -122,6 +148,10 @@ function categoryBadgeClass(category: string): string {
       return "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/20";
     case "investment":
       return "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border-cyan-500/20";
+    case "deposit":
+      return "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/20";
+    case "card_payment":
+      return "bg-violet-500/15 text-violet-600 dark:text-violet-400 border-violet-500/20";
     default:
       return "bg-muted text-muted-foreground border-border";
   }
@@ -139,6 +169,7 @@ export function TransactionsView() {
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
   const [search, setSearch] = useState<string>("");
+  const [groupFilter, setGroupFilter] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Tx | null>(null);
 
@@ -175,6 +206,8 @@ export function TransactionsView() {
       if (tab !== "all" && t.type !== tab) return false;
       if (category !== "all" && t.category !== category) return false;
       if (walletFilter !== "all" && t.walletId !== walletFilter) return false;
+      // filtro por compra parcelada (clicou no badge da parcela)
+      if (groupFilter && t.installmentGroup !== groupFilter) return false;
       if (search) {
         const s = search.toLowerCase();
         const desc = t.description?.toLowerCase().includes(s);
@@ -193,7 +226,7 @@ export function TransactionsView() {
       }
       return true;
     });
-  }, [txs, tab, category, walletFilter, search, dateFrom, dateTo]);
+  }, [txs, tab, category, walletFilter, search, dateFrom, dateTo, groupFilter]);
 
   const totals = useMemo(() => {
     let income = 0;
@@ -237,14 +270,7 @@ export function TransactionsView() {
         label: "Categoria",
         type: "select",
         required: true,
-        options: [
-          { value: "service", label: "Serviço" },
-          { value: "fixed", label: "Conta Fixa" },
-          { value: "variable", label: "Despesa Variável" },
-          { value: "salary", label: "Salário" },
-          { value: "investment", label: "Investimento" },
-          { value: "other", label: "Outro" },
-        ],
+        options: CATEGORY_OPTIONS,
         default: editing?.category ?? "other",
       },
       {
@@ -254,6 +280,10 @@ export function TransactionsView() {
         required: true,
         placeholder: "Ex: Pagamento de cliente X",
         default: editing?.description ?? "",
+        hint:
+          editing?.installments && Number(editing.installments) > 1
+            ? `Parcela ${editing.installmentNo}/${editing.installments} de uma compra parcelada — a edição vale só para esta parcela.`
+            : undefined,
       },
       {
         name: "amount",
@@ -269,6 +299,7 @@ export function TransactionsView() {
         label: "Data",
         type: "datetime-local",
         default: editDate,
+        hint: "Vale data passada (ex: aquela grana do mês passado) ou futura.",
       },
       {
         name: "paymentMethod",
@@ -290,6 +321,15 @@ export function TransactionsView() {
         type: "select",
         options: cardOptions,
         default: editing?.creditCardId ?? "",
+      },
+      {
+        name: "installments",
+        label: "Parcelamento",
+        type: "select",
+        options: INSTALLMENT_OPTIONS,
+        default: "1",
+        visible: (v) => !editing && v.type === "expense" && !!v.creditCardId,
+        hint: "O valor informado é o TOTAL da compra: vira 1 lançamento por mês e o limite do cartão cai na hora.",
       },
       {
         name: "person",
@@ -387,12 +427,11 @@ export function TransactionsView() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todas categorias</SelectItem>
-                  <SelectItem value="service">Serviço</SelectItem>
-                  <SelectItem value="fixed">Conta Fixa</SelectItem>
-                  <SelectItem value="variable">Despesa Variável</SelectItem>
-                  <SelectItem value="salary">Salário</SelectItem>
-                  <SelectItem value="investment">Investimento</SelectItem>
-                  <SelectItem value="other">Outro</SelectItem>
+                  {CATEGORY_OPTIONS.map((c) => (
+                    <SelectItem key={c.value} value={c.value}>
+                      {c.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -440,13 +479,23 @@ export function TransactionsView() {
 
       {/* Transactions list */}
       <Card>
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
           <h3 className="font-semibold">
             Lançamentos{" "}
             <span className="text-xs font-normal text-muted-foreground">
               ({filtered.length})
             </span>
           </h3>
+          {groupFilter && (
+            <button
+              type="button"
+              onClick={() => setGroupFilter(null)}
+              className="text-xs inline-flex items-center gap-1.5 rounded-full border border-orange-500/30 bg-orange-500/10 text-orange-600 dark:text-orange-400 px-3 py-1.5 hover:bg-orange-500/20 transition-colors"
+            >
+              Mostrando só uma compra parcelada
+              <X className="h-3 w-3" />
+            </button>
+          )}
         </div>
 
         {loading ? (
@@ -509,6 +558,22 @@ export function TransactionsView() {
                             className="bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20 text-[10px]"
                           >
                             Avulso
+                          </Badge>
+                        )}
+                        {Number(t.installments) > 1 && (
+                          <Badge
+                            variant="outline"
+                            className="bg-orange-500/15 text-orange-600 dark:text-orange-400 border-orange-500/20 text-[10px] cursor-pointer hover:bg-orange-500/25 transition-colors"
+                            onClick={() =>
+                              setGroupFilter(
+                                groupFilter === t.installmentGroup
+                                  ? null
+                                  : t.installmentGroup ?? null
+                              )
+                            }
+                            title="Clique para ver todas as parcelas desta compra"
+                          >
+                            {t.installmentNo}/{t.installments}
                           </Badge>
                         )}
                         {t.recurring && (
@@ -579,13 +644,23 @@ export function TransactionsView() {
 
       <FormModal
         open={modalOpen}
-        onOpenChange={setModalOpen}
+        onOpenChange={(v) => {
+          setModalOpen(v);
+          if (!v) setGroupFilter(null);
+        }}
         title={editing ? "Editar Transação" : "Nova Transação"}
-        description="Lançamentos de entrada ou saída. Pode ser de um cliente cadastrado ou de qualquer pessoa avulsa — só digitar o nome. Para compras no crédito, selecione um cartão."
+        description="Entrada ou saída, de cliente cadastrado ou pessoa avulsa — só digitar o nome. Compra no cartão? Selecione o cartão e escolha em quantas vezes quer parcelar."
         fields={buildFields()}
         initialData={editing ?? undefined}
         endpoint="/api/crud/transactions"
         id={editing?.id}
+        successMessage={(v) => {
+          const n = Number(v.installments) || 1;
+          if (n > 1 && v.creditCardId && v.type === "expense") {
+            return `Compra parcelada criada: ${n} lançamentos mensais!`;
+          }
+          return "Lançamento criado!";
+        }}
       />
     </div>
   );
