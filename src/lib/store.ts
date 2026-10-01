@@ -17,7 +17,9 @@ export type ViewKey =
   | "receipt"
   | "budget"
   | "goals"
-  | "assistant";
+  | "assistant"
+  | "unitv"
+  | "settings";
 
 interface AppState {
   view: ViewKey;

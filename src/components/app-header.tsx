@@ -34,6 +34,8 @@ const VIEW_TITLES: Record<string, string> = {
   budget: "Orçamentos",
   goals: "Metas de Depósito",
   assistant: "Assistente IA",
+  unitv: "UNITV",
+  settings: "Configurações",
 };
 
 export function AppHeader() {

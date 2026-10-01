@@ -20,6 +20,9 @@ import { ReceiptsView } from "@/components/views/receipts";
 import { BudgetsView } from "@/components/views/budgets";
 import { GoalsView } from "@/components/views/goals";
 import { AssistantView } from "@/components/views/assistant";
+import { UnitvView } from "@/components/views/unitv";
+import { SettingsView } from "@/components/views/settings";
+import { toast } from "sonner";
 import { Footer } from "@/components/footer";
 import { Sparkles } from "lucide-react";
 
@@ -55,6 +58,26 @@ export function AppShell() {
         })
         .catch(() => {});
     }
+  }, [authed]);
+
+  // Alerta de vencimentos UNITV ao abrir o sistema
+  useEffect(() => {
+    if (!authed) return;
+    fetch("/api/unitv/summary")
+      .then((r) => r.json())
+      .then((d) => {
+        const sum = d?.data;
+        if (!sum || !sum.alertCount) return;
+        const parts: string[] = [];
+        if (sum.soonCount) parts.push(`${sum.soonCount} vencendo em até ${sum.alertDays} dias`);
+        if (sum.expiredCount) parts.push(`${sum.expiredCount} já vencido${sum.expiredCount > 1 ? "s" : ""}`);
+        toast.warning("UNITV: clientes para renovar", {
+          description: parts.join(" • "),
+          duration: 12000,
+          action: { label: "Ver", onClick: () => useAppStore.getState().setView("unitv") },
+        });
+      })
+      .catch(() => {});
   }, [authed]);
 
   if (!booted) {
@@ -98,6 +121,8 @@ export function AppShell() {
             {view === "budget" && <BudgetsView />}
             {view === "goals" && <GoalsView />}
             {view === "assistant" && <AssistantView />}
+            {view === "unitv" && <UnitvView />}
+            {view === "settings" && <SettingsView />}
           </div>
         </main>
       </div>

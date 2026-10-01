@@ -28,26 +28,26 @@ model User {
 // CLIENTES
 // ============================================================
 model Client {
-  id          String   @id @default(cuid())
-  name        String
-  email       String?
-  phone       String?
-  document    String?
-  address     String?
-  city        String?
-  state       String?
-  zip         String?
-  notes       String?
-  isMonthly   Boolean  @default(false)
-  monthlyFee  Decimal? @db.Decimal(10, 2)
-  monthlyDay  Int?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String   @id @default(cuid())
+  name       String
+  email      String?
+  phone      String?
+  document   String?
+  address    String?
+  city       String?
+  state      String?
+  zip        String?
+  notes      String?
+  isMonthly  Boolean  @default(false)
+  monthlyFee Decimal? @db.Decimal(10, 2)
+  monthlyDay Int?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  orders      ServiceOrder[]
-  receivables Receivable[]
-  receipts    Receipt[]
-  budgets     Budget[]
+  orders       ServiceOrder[]
+  receivables  Receivable[]
+  receipts     Receipt[]
+  budgets      Budget[]
   transactions Transaction[]
 }
 
@@ -72,26 +72,26 @@ model ServiceType {
 // ORDENS DE SERVIÇO / PRODUÇÃO
 // ============================================================
 model ServiceOrder {
-  id           String   @id @default(cuid())
-  number       String   @unique
-  clientId     String
+  id            String    @id @default(cuid())
+  number        String    @unique
+  clientId      String
   serviceTypeId String
-  title        String
-  description  String?
-  status       String   @default("todo")
-  priority     String   @default("medium")
-  price        Decimal  @db.Decimal(10, 2)
-  cost         Decimal  @db.Decimal(10, 2) @default(0)
-  deadline     DateTime?
-  startedAt    DateTime?
-  finishedAt   DateTime?
-  deliveredAt  DateTime?
-  paid         Boolean  @default(false)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  title         String
+  description   String?
+  status        String    @default("todo")
+  priority      String    @default("medium")
+  price         Decimal   @db.Decimal(10, 2)
+  cost          Decimal   @default(0) @db.Decimal(10, 2)
+  deadline      DateTime?
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  deliveredAt   DateTime?
+  paid          Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  serviceType  ServiceType  @relation(fields: [serviceTypeId], references: [id])
+  client       Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  serviceType  ServiceType   @relation(fields: [serviceTypeId], references: [id])
   transactions Transaction[]
   receipts     Receipt[]
   budgets      Budget[]
@@ -117,14 +117,14 @@ model Transaction {
   creditCardId  String?
   clientId      String?
   orderId       String?
-  recurring     Boolean   @default(false)
+  recurring     Boolean  @default(false)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  client     Client?        @relation(fields: [clientId], references: [id])
-  order      ServiceOrder?  @relation(fields: [orderId], references: [id])
-  wallet     Wallet?        @relation(fields: [walletId], references: [id])
-  creditCard CreditCard?    @relation(fields: [creditCardId], references: [id])
+  client     Client?       @relation(fields: [clientId], references: [id])
+  order      ServiceOrder? @relation(fields: [orderId], references: [id])
+  wallet     Wallet?       @relation(fields: [walletId], references: [id])
+  creditCard CreditCard?   @relation(fields: [creditCardId], references: [id])
 
   @@index([type])
   @@index([date])
@@ -155,20 +155,20 @@ model FixedAccount {
 // CONTAS A PAGAR
 // ============================================================
 model Payable {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
   description   String
-  amount        Decimal  @db.Decimal(10, 2)
+  amount        Decimal   @db.Decimal(10, 2)
   dueDate       DateTime
-  paid          Boolean  @default(false)
+  paid          Boolean   @default(false)
   paidAt        DateTime?
   paymentMethod String?
   walletId      String?
-  creditCardId String?
+  creditCardId  String?
   category      String?
   supplier      String?
   notes         String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   wallet     Wallet?     @relation(fields: [walletId], references: [id])
   creditCard CreditCard? @relation(fields: [creditCardId], references: [id])
@@ -178,38 +178,38 @@ model Payable {
 // CONTAS A RECEBER
 // ============================================================
 model Receivable {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
   clientId      String
   description   String
-  amount        Decimal  @db.Decimal(10, 2)
+  amount        Decimal   @db.Decimal(10, 2)
   dueDate       DateTime
-  received      Boolean  @default(false)
+  received      Boolean   @default(false)
   receivedAt    DateTime?
   paymentMethod String?
   walletId      String?
   orderId       String?
   notes         String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  client     Client?        @relation(fields: [clientId], references: [id])
-  wallet     Wallet?        @relation(fields: [walletId], references: [id])
-  order      ServiceOrder?  @relation(fields: [orderId], references: [id])
+  client Client?       @relation(fields: [clientId], references: [id])
+  wallet Wallet?       @relation(fields: [walletId], references: [id])
+  order  ServiceOrder? @relation(fields: [orderId], references: [id])
 }
 
 // ============================================================
 // CARTEIRAS
 // ============================================================
 model Wallet {
-  id          String   @id @default(cuid())
-  name        String
-  type        String
-  balance     Decimal  @db.Decimal(10, 2) @default(0)
-  color       String   @default("#0066FF")
-  icon        String?
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(cuid())
+  name      String
+  type      String
+  balance   Decimal  @default(0) @db.Decimal(10, 2)
+  color     String   @default("#0066FF")
+  icon      String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   transactions  Transaction[]
   fixedAccounts FixedAccount[]
@@ -223,20 +223,20 @@ model Wallet {
 // CARTÕES DE CRÉDITO
 // ============================================================
 model CreditCard {
-  id          String   @id @default(cuid())
-  name        String
-  walletId    String?
-  totalLimit  Decimal  @db.Decimal(10, 2)
-  usedLimit   Decimal  @db.Decimal(10, 2) @default(0)
-  closingDay  Int?
-  dueDay      Int?
-  color       String   @default("#FF6B00")
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String   @id @default(cuid())
+  name       String
+  walletId   String?
+  totalLimit Decimal  @db.Decimal(10, 2)
+  usedLimit  Decimal  @default(0) @db.Decimal(10, 2)
+  closingDay Int?
+  dueDay     Int?
+  color      String   @default("#FF6B00")
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  wallet       Wallet?      @relation(fields: [walletId], references: [id])
-  transactions Transaction[]
+  wallet        Wallet?        @relation(fields: [walletId], references: [id])
+  transactions  Transaction[]
   fixedAccounts FixedAccount[]
   payables      Payable[]
 }
@@ -245,16 +245,16 @@ model CreditCard {
 // METAS DE DEPÓSITO
 // ============================================================
 model Goal {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
   name          String
-  targetAmount  Decimal  @db.Decimal(10, 2)
-  currentAmount Decimal  @db.Decimal(10, 2) @default(0)
-  minDeposit    Decimal  @db.Decimal(10, 2)
+  targetAmount  Decimal   @db.Decimal(10, 2)
+  currentAmount Decimal   @default(0) @db.Decimal(10, 2)
+  minDeposit    Decimal   @db.Decimal(10, 2)
   deadline      DateTime?
-  walletId      String?  @unique
-  active        Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  walletId      String?   @unique
+  active        Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   wallet Wallet? @relation(fields: [walletId], references: [id])
 }
@@ -277,30 +277,30 @@ model Receipt {
   createdAt     DateTime @default(now())
 
   client Client?       @relation(fields: [clientId], references: [id])
-  order ServiceOrder?  @relation(fields: [orderId], references: [id])
+  order  ServiceOrder? @relation(fields: [orderId], references: [id])
 }
 
 // ============================================================
 // ORÇAMENTOS
 // ============================================================
 model Budget {
-  id          String   @id @default(cuid())
-  number      String   @unique
-  clientId    String?
-  orderId     String?
-  title       String
-  items       String   // JSON string (o código grava JSON.stringify)
-  total       Decimal  @db.Decimal(10, 2)
-  discount    Decimal  @db.Decimal(10, 2) @default(0)
-  finalTotal  Decimal  @db.Decimal(10, 2)
-  validUntil  DateTime?
-  status      String   @default("draft")
-  notes       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String    @id @default(cuid())
+  number     String    @unique
+  clientId   String?
+  orderId    String?
+  title      String
+  items      String // JSON string (o código grava JSON.stringify)
+  total      Decimal   @db.Decimal(10, 2)
+  discount   Decimal   @default(0) @db.Decimal(10, 2)
+  finalTotal Decimal   @db.Decimal(10, 2)
+  validUntil DateTime?
+  status     String    @default("draft")
+  notes      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
-  client Client?      @relation(fields: [clientId], references: [id])
-  order ServiceOrder? @relation(fields: [orderId], references: [id])
+  client Client?       @relation(fields: [clientId], references: [id])
+  order  ServiceOrder? @relation(fields: [orderId], references: [id])
 }
 
 // ============================================================
@@ -310,4 +310,44 @@ model Setting {
   id    String @id @default(cuid())
   key   String @unique
   value String
+}
+
+// ============================================================
+// UNITV — CLIENTES DO PAINEL IPTV E RENOVAÇÕES
+// ============================================================
+model IptvClient {
+  id         String   @id @default(cuid())
+  name       String
+  phone      String?
+  username   String?
+  notes      String?
+  expiresAt  DateTime
+  lastAmount Decimal  @default(0) @db.Decimal(10, 2)
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  renewals IptvRenewal[]
+
+  @@index([expiresAt])
+}
+
+model IptvRenewal {
+  id             String    @id @default(cuid())
+  clientId       String
+  kind           String    @default("renewal") // activation | renewal
+  planMonths     Int       @default(1)
+  amount         Decimal   @db.Decimal(10, 2)
+  paidAt         DateTime  @default(now())
+  previousExpiry DateTime?
+  newExpiry      DateTime
+  walletId       String?
+  transactionId  String?
+  notes          String?
+  createdAt      DateTime  @default(now())
+
+  client IptvClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId])
+  @@index([paidAt])
 }

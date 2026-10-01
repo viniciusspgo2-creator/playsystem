@@ -313,3 +313,43 @@ model Setting {
   key   String @unique
   value String
 }
+
+// ============================================================
+// UNITV — CLIENTES DO PAINEL IPTV E RENOVAÇÕES
+// ============================================================
+model IptvClient {
+  id         String   @id @default(cuid())
+  name       String
+  phone      String?
+  username   String?
+  notes      String?
+  expiresAt  DateTime
+  lastAmount Decimal  @db.Decimal(10, 2) @default(0)
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  renewals IptvRenewal[]
+
+  @@index([expiresAt])
+}
+
+model IptvRenewal {
+  id             String    @id @default(cuid())
+  clientId       String
+  kind           String    @default("renewal") // activation | renewal
+  planMonths     Int       @default(1)
+  amount         Decimal   @db.Decimal(10, 2)
+  paidAt         DateTime  @default(now())
+  previousExpiry DateTime?
+  newExpiry      DateTime
+  walletId       String?
+  transactionId  String?
+  notes          String?
+  createdAt      DateTime  @default(now())
+
+  client IptvClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId])
+  @@index([paidAt])
+}

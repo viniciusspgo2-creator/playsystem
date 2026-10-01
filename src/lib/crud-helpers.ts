@@ -16,7 +16,6 @@ const MODEL_MAP: Record<string, string> = {
   goals: "goal",
   receipts: "receipt",
   budgets: "budget",
-  settings: "setting",
 };
 
 export function getModel(resource: string) {

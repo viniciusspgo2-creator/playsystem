@@ -1,14 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { getSettings, resolveGeminiKey } from "@/lib/settings";
+import { geminiGenerate, type GeminiContent } from "@/lib/gemini";
+import { daysUntil, daysLabel, fmtBR, todayBR, ymd } from "@/lib/unitv";
+
+export const maxDuration = 60;
 
 // GET system context for the AI assistant
-async function buildSystemContext(): Promise<string> {
+async function buildSystemContext(settings: Record<string, string>): Promise<string> {
   let context = `Você é o assistente oficial do "PlayMedia System", um sistema de gestão financeira pessoal.
 Conhece TODAS as funcionalidades: clientes, serviços, ordens de produção, transações (entrada/saída),
 contas fixas, contas a pagar/receber, mensalistas, carteiras (Nubank, PicPay, Mercado Pago),
 cartões de crédito (Credicard, Banco BV, Mercado Pago, PicPay, Wise, PayPal, Nubank),
-metas de depósito, comprovantes de pagamento, orçamentos e pipeline de produção (Kanban: a fazer, fazendo, concluído, entregue).
+metas de depósito, comprovantes de pagamento, orçamentos, pipeline de produção (Kanban: a fazer, fazendo, concluído, entregue)
+e a aba UNITV (clientes de assinatura IPTV, renovações e vencimentos).
 
 RESPOSTAS SEMPRE em português brasileiro, objetivas e amigáveis. Use emojis com moderação.
 
@@ -85,6 +91,18 @@ Quando o usuário pedir informações, busque abaixo os dados atuais e resuma de
       context += `\n### META ATIVA: ${goal.name} — Objetivo R$ ${Number(goal.targetAmount).toFixed(2)} | Acumulado R$ ${Number(goal.currentAmount).toFixed(2)} | Depósito mínimo R$ ${Number(goal.minDeposit).toFixed(2)}\n`;
     }
 
+    const alertDays = parseInt(settings.unitv_alert_days, 10) || 5;
+    const iptv = await db.iptvClient.findMany({ where: { active: true }, orderBy: { expiresAt: "asc" } });
+    const today = todayBR();
+    const iptvDue = iptv
+      .map((c) => ({ c, days: daysUntil(ymd(c.expiresAt), today) }))
+      .filter((x) => x.days <= alertDays);
+    context += `\n### UNITV (${iptv.length} clientes ativos). Alerta configurado: ${alertDays} dias antes de vencer.\n`;
+    context += `Vencidos ou vencendo em até ${alertDays} dias (${iptvDue.length}):\n`;
+    iptvDue.slice(0, 40).forEach(({ c, days }) => {
+      context += `- ${c.name}${c.phone ? ` tel:${c.phone}` : ""} | vence ${fmtBR(c.expiresAt)} (${daysLabel(days)}) | último valor R$ ${Number(c.lastAmount).toFixed(2)}\n`;
+    });
+
     context += `\n== FIM DOS DADOS ==\n`;
     context += `\nCom base nesses dados, responda às perguntas do usuário. Você pode:
 1. Resumir a situação financeira atual
@@ -113,28 +131,42 @@ export async function POST(req: NextRequest) {
     if (!message)
       return NextResponse.json({ error: "Mensagem obrigatória" }, { status: 400 });
 
-    const systemPrompt = await buildSystemContext();
+    const settings = await getSettings();
+    const apiKey = resolveGeminiKey(settings);
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: "Chave do Gemini não configurada. Vá em Configurações > Inteligência Artificial e cole sua chave do Google AI Studio." },
+        { status: 400 }
+      );
+    }
 
-    const messages: { role: string; content: string }[] = [
-      { role: "assistant", content: systemPrompt },
-    ];
+    let systemPrompt = await buildSystemContext(settings);
+    if (settings.ai_extra_instructions) {
+      systemPrompt += `\n\n== INSTRUÇÕES EXTRAS DO DONO DO SISTEMA ==\n${settings.ai_extra_instructions}`;
+    }
+
+    // Histórico no formato do Gemini (user/model alternando, começando por user)
+    const contents: GeminiContent[] = [];
+    const push = (role: "user" | "model", text: string) => {
+      if (!text) return;
+      const last = contents[contents.length - 1];
+      if (last && last.role === role) last.parts[0].text += `\n\n${text}`;
+      else contents.push({ role, parts: [{ text }] });
+    };
     if (Array.isArray(history)) {
       for (const h of history.slice(-10)) {
-        messages.push({ role: h.role === "user" ? "user" : "assistant", content: h.content });
+        push(h.role === "user" ? "user" : "model", String(h.content ?? ""));
       }
     }
-    messages.push({ role: "user", content: message });
+    push("user", String(message));
+    while (contents.length && contents[0].role !== "user") contents.shift();
 
-    // Use z-ai-web-dev-sdk (provides Gemini-class model)
-    const ZAI = (await import("z-ai-web-dev-sdk")).default;
-    const zai = await ZAI.create();
-
-    const completion = await zai.chat.completions.create({
-      messages: messages as any,
-      thinking: { type: "disabled" },
+    const reply = await geminiGenerate({
+      apiKey,
+      model: settings.gemini_model,
+      system: systemPrompt,
+      contents,
     });
-
-    const reply = completion.choices[0]?.message?.content || "Sem resposta.";
 
     return NextResponse.json({ reply });
   } catch (e: any) {

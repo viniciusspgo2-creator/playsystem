@@ -32,7 +32,7 @@ interface ChatMessage {
 const WELCOME: ChatMessage = {
   role: "assistant",
   content:
-    "Olá! 👋 Sou o **Assistente PlayMedia**, conectado ao **Gemini AI**.\n\nEu tenho acesso a *todo* o seu sistema financeiro em tempo real:\n\n- 💰 Carteiras, transações e metas de depósito\n- 👥 Clientes (incluindo mensalistas)\n- 🏭 Ordens de serviço / pipeline de produção\n- 💳 Cartões de crédito e limites\n- 📅 Contas a pagar e a receber (inclusive vencidas)\n\nMe pergunte qualquer coisa — **seu saldo, quem tá te devendo, contas vencidas, status da produção, resumo do mês** — e eu respondo com base nos seus dados atuais. 🚀",
+    "Olá! 👋 Sou o **Assistente PlayMedia**, conectado ao **Gemini AI**.\n\nEu tenho acesso a *todo* o seu sistema financeiro em tempo real:\n\n- 💰 Carteiras, transações e metas de depósito\n- 👥 Clientes (incluindo mensalistas)\n- 🏭 Ordens de serviço / pipeline de produção\n- 💳 Cartões de crédito e limites\n- 📅 Contas a pagar e a receber (inclusive vencidas)\n- 📺 Clientes UNITV e quem está para vencer\n\nMe pergunte qualquer coisa — **seu saldo, quem tá te devendo, contas vencidas, status da produção, resumo do mês** — e eu respondo com base nos seus dados atuais. 🚀",
 };
 
 const SUGGESTIONS = [

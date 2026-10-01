@@ -18,8 +18,11 @@ import {
   Bot,
   X,
   Sparkles,
+  Tv,
+  Settings,
 } from "lucide-react";
 import { useAppStore, type ViewKey } from "@/lib/store";
+import { useFetch } from "@/lib/api-hooks";
 import { cn } from "@/lib/utils";
 
 const NAV_GROUPS: {
@@ -32,6 +35,10 @@ const NAV_GROUPS: {
       { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
       { key: "assistant", label: "Assistente IA", icon: Bot, desc: "Gemini" },
     ],
+  },
+  {
+    label: "Assinaturas",
+    items: [{ key: "unitv", label: "UNITV", icon: Tv }],
   },
   {
     label: "Cadastros",
@@ -63,6 +70,10 @@ const NAV_GROUPS: {
       { key: "goals", label: "Metas de Depósito", icon: Target },
     ],
   },
+  {
+    label: "Sistema",
+    items: [{ key: "settings", label: "Configurações", icon: Settings }],
+  },
 ];
 
 export function Sidebar({
@@ -73,6 +84,8 @@ export function Sidebar({
   onChange: (v: ViewKey) => void;
 }) {
   const { sidebarOpen, setSidebarOpen } = useAppStore();
+  const { data: unitvSummary } = useFetch<{ alertCount: number }>("/api/unitv/summary");
+  const unitvAlerts = unitvSummary?.alertCount ?? 0;
 
   const SidebarContent = (
     <nav className="flex flex-col gap-5 p-4 h-full overflow-y-auto no-scrollbar">
@@ -120,6 +133,11 @@ export function Sidebar({
                   )}
                 />
                 <span className="flex-1 text-left">{item.label}</span>
+                {item.key === "unitv" && unitvAlerts > 0 && (
+                  <span className="min-w-5 text-center text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500 text-white font-bold">
+                    {unitvAlerts}
+                  </span>
+                )}
                 {item.desc && (
                   <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-accent-blue/10 text-accent-blue font-semibold">
                     {item.desc}

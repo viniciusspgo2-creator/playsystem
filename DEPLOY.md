@@ -124,3 +124,23 @@ prisma/
 - Zustand (estado client)
 - z-ai-web-dev-sdk (Gemini AI no backend)
 - scrypt (hash de senha, sem libs externas)
+
+---
+
+## Novidades: Configurações + UNITV
+
+### Configurações (menu "Sistema > Configurações")
+- **Gemini**: cole a chave gerada em https://aistudio.google.com/apikey, clique em **Buscar modelos** (lista os Gemini 3+ liberados na sua chave), escolha o modelo, **Testar conexão** e **Salvar tudo**.
+  - A chave fica salva no banco (tabela `Setting`) e nunca é devolvida inteira para a tela (só os 4 últimos caracteres).
+  - Alternativa: definir `GEMINI_API_KEY` nas variáveis da Vercel. A chave salva em Configurações tem prioridade.
+- **UNITV**: quantos dias antes do vencimento avisar (padrão 5) e o texto da mensagem de WhatsApp (`{nome}` `{vencimento}` `{dias}` `{valor}`).
+- **Instruções extras para a IA**: texto livre que é somado ao prompt do Assistente.
+
+### UNITV (menu "Assinaturas > UNITV")
+- Cadastro de clientes do painel IPTV (nome, WhatsApp, usuário, vencimento, valor habitual). Importação em massa colando a lista (`nome; whatsapp; vencimento; valor; usuário`).
+- **Renovar / Ativar**: informa plano (1, 3, 6, 12 meses ou outro), valor livre, data e carteira. O vencimento é calculado (se ainda ativo soma no vencimento atual; se já venceu conta do pagamento) e pode ser ajustado.
+- Cada renovação gera automaticamente uma **entrada** em Entradas & Saídas (categoria Serviço, descrição "UNITV - Renovação - Nome") e soma na carteira escolhida. Desfazer um lançamento no Histórico remove a entrada e estorna a carteira.
+- **Alertas**: aviso ao abrir o sistema, número no menu UNITV, faixa de alerta no topo da aba e botão de WhatsApp pronto.
+
+### Banco de dados
+Duas tabelas novas (`IptvClient`, `IptvRenewal`). O `build` já roda `prisma db push`, então elas são criadas sozinhas no deploy (só adiciona tabelas, não mexe nos dados atuais).
