@@ -5,6 +5,7 @@ import { persist } from "zustand/middleware";
 
 export type ViewKey =
   | "dashboard"
+  | "reminders"
   | "clients"
   | "services"
   | "transactions"

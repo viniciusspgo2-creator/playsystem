@@ -4,13 +4,14 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000 2>&1 | tee dev.log",
-    "build": "prisma generate && prisma db push --accept-data-loss --skip-generate && next build",
+    "build": "prisma generate --schema prisma/schema.vercel.prisma && prisma db push --schema prisma/schema.vercel.prisma --accept-data-loss --skip-generate && next build",
     "start": "NODE_ENV=production bun .next/standalone/server.js 2>&1 | tee server.log",
     "lint": "eslint .",
     "db:push": "prisma db push --accept-data-loss",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
-    "db:reset": "prisma migrate reset"
+    "db:reset": "prisma migrate reset",
+    "db:push:vercel": "prisma db push --schema prisma/schema.vercel.prisma --accept-data-loss"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

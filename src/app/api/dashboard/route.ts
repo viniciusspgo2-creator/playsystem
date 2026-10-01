@@ -141,6 +141,39 @@ export async function GET(req: NextRequest) {
       include: { wallet: { select: { name: true } } },
     });
 
+    // ===== FOCO DE HOJE (modo TDAH: o que importa agora) =====
+    const startToday = new Date(now);
+    startToday.setHours(0, 0, 0, 0);
+    const endToday = new Date(now);
+    endToday.setHours(23, 59, 59, 999);
+
+    const openReminders = await db.reminder.findMany({ where: { done: false } });
+    const focusReminders = openReminders
+      .filter((r) => r.dueDate && new Date(r.dueDate) <= endToday)
+      .sort((a, b) => {
+        const order: Record<string, number> = { high: 0, normal: 1, low: 2 };
+        const pa = order[a.priority] ?? 1;
+        const pb = order[b.priority] ?? 1;
+        if (pa !== pb) return pa - pb;
+        return (
+          new Date(a.dueDate!).getTime() - new Date(b.dueDate!).getTime()
+        );
+      })
+      .slice(0, 8);
+
+    const receivablesToday = pendingReceivables
+      .filter((r) => {
+        const d = new Date(r.dueDate);
+        return d >= startToday && d <= endToday;
+      })
+      .slice(0, 6);
+    const payablesToday = pendingPayables
+      .filter((p) => {
+        const d = new Date(p.dueDate);
+        return d >= startToday && d <= endToday;
+      })
+      .slice(0, 6);
+
     return NextResponse.json({
       totals: {
         balance: totalBalance,
@@ -216,6 +249,29 @@ export async function GET(req: NextRequest) {
         dueDate: p.dueDate,
         supplier: p.supplier,
       })),
+      focus: {
+        reminders: focusReminders.map((r) => ({
+          id: r.id,
+          title: r.title,
+          priority: r.priority,
+          dueDate: r.dueDate,
+          overdue: r.dueDate ? new Date(r.dueDate) < startToday : false,
+        })),
+        receivablesToday: receivablesToday.map((r) => ({
+          id: r.id,
+          description: r.description,
+          amount: Number(r.amount),
+          person: r.client?.name || r.clientName || "Avulso",
+        })),
+        payablesToday: payablesToday.map((p) => ({
+          id: p.id,
+          description: p.description,
+          amount: Number(p.amount),
+          supplier: p.supplier || "",
+        })),
+        overdueReceivablesCount: overdueReceivables.length,
+        overduePayablesCount: overduePayables.length,
+      },
       goal: goal
         ? {
             id: goal.id,

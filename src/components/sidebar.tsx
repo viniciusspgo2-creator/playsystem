@@ -20,6 +20,7 @@ import {
   Sparkles,
   Tv,
   Settings,
+  Bell,
 } from "lucide-react";
 import { useAppStore, type ViewKey } from "@/lib/store";
 import { useFetch } from "@/lib/api-hooks";
@@ -33,6 +34,7 @@ const NAV_GROUPS: {
     label: "Visão Geral",
     items: [
       { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+      { key: "reminders", label: "Lembretes", icon: Bell, desc: "TDAH" },
       { key: "assistant", label: "Assistente IA", icon: Bot, desc: "Gemini" },
     ],
   },
@@ -87,6 +89,18 @@ export function Sidebar({
   const { data: unitvSummary } = useFetch<{ alertCount: number }>("/api/unitv/summary");
   const unitvAlerts = unitvSummary?.alertCount ?? 0;
 
+  const range = (() => {
+    const s = new Date();
+    s.setHours(0, 0, 0, 0);
+    const e = new Date();
+    e.setHours(23, 59, 59, 999);
+    return { from: s.toISOString(), to: e.toISOString() };
+  })();
+  const { data: remSummary } = useFetch<{ badge: number }>(
+    `/api/reminders/summary?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`
+  );
+  const reminderAlerts = remSummary?.badge ?? 0;
+
   const SidebarContent = (
     <nav className="flex flex-col gap-5 p-4 h-full overflow-y-auto no-scrollbar">
       <div className="flex items-center justify-between px-2 lg:hidden">
@@ -136,6 +150,11 @@ export function Sidebar({
                 {item.key === "unitv" && unitvAlerts > 0 && (
                   <span className="min-w-5 text-center text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500 text-white font-bold">
                     {unitvAlerts}
+                  </span>
+                )}
+                {item.key === "reminders" && reminderAlerts > 0 && (
+                  <span className="min-w-5 text-center text-[10px] px-1.5 py-0.5 rounded-full bg-rose-500 text-white font-bold animate-pulse">
+                    {reminderAlerts}
                   </span>
                 )}
                 {item.desc && (

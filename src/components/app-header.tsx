@@ -13,14 +13,18 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Sparkles, Menu, LogOut, User as UserIcon } from "lucide-react";
+import { Sparkles, Menu, LogOut, User as UserIcon, Bell, AlarmClock } from "lucide-react";
 import { useAppStore } from "@/lib/store";
 import { useFetch } from "@/lib/api-hooks";
 import { apiDelete } from "@/lib/api-hooks";
 import { toast } from "sonner";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 const VIEW_TITLES: Record<string, string> = {
   dashboard: "Dashboard",
+  reminders: "Lembretes",
   clients: "Clientes",
   services: "Serviços & Catálogo",
   transactions: "Entradas & Saídas",
@@ -39,11 +43,34 @@ const VIEW_TITLES: Record<string, string> = {
 };
 
 export function AppHeader() {
-  const { view, setSidebarOpen } = useAppStore();
+  const { view, setView, setSidebarOpen } = useAppStore();
   const { data: auth } = useFetch<{
     user: { name: string; email: string } | null;
   }>("/api/auth");
   const [now, setNow] = useState(new Date());
+
+  // Lembretes para o sino (atrasados + hoje)
+  const range = (() => {
+    const s = new Date();
+    s.setHours(0, 0, 0, 0);
+    const e = new Date();
+    e.setHours(23, 59, 59, 999);
+    return { from: s.toISOString(), to: e.toISOString() };
+  })();
+  const { data: remSummary } = useFetch<{
+    badge: number;
+    overdue: number;
+    today: number;
+    items: {
+      id: string;
+      title: string;
+      dueDate: string | null;
+      priority: string;
+      overdue: boolean;
+    }[];
+  }>(
+    `/api/reminders/summary?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`
+  );
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000 * 30);
@@ -114,6 +141,99 @@ export function AppHeader() {
               })}
             </p>
           </div>
+
+          {/* Sino de lembretes */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="relative h-10 w-10 rounded-full hover:bg-accent"
+                title="Lembretes"
+              >
+                <Bell className="h-5 w-5" />
+                {!!remSummary?.badge && remSummary.badge > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center border-2 border-background animate-pulse">
+                    {remSummary.badge > 9 ? "9+" : remSummary.badge}
+                  </span>
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-80 p-0">
+              <div className="flex items-center gap-2 px-4 py-3 border-b border-border/60">
+                <AlarmClock className="h-4 w-4 text-primary" />
+                <p className="text-sm font-semibold flex-1">Foco de agora</p>
+                {!!remSummary?.badge && remSummary.badge > 0 && (
+                  <Badge className="bg-rose-500 text-white text-[10px]">
+                    {remSummary.badge} pendente{remSummary.badge > 1 ? "s" : ""}
+                  </Badge>
+                )}
+              </div>
+              <div className="max-h-72 overflow-y-auto">
+                {!remSummary || remSummary.items.length === 0 ? (
+                  <div className="px-4 py-6 text-center">
+                    <p className="text-sm font-medium">Tudo tranquilo 🧘</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Nenhum lembrete atrasado ou para hoje.
+                    </p>
+                  </div>
+                ) : (
+                  remSummary.items.map((r) => (
+                    <button
+                      key={r.id}
+                      onClick={() => {
+                        setView("reminders");
+                      }}
+                      className={cn(
+                        "w-full text-left px-4 py-2.5 border-b border-border/40 last:border-0 hover:bg-accent/50 transition-colors flex items-start gap-2",
+                        r.overdue && "bg-rose-500/5"
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "mt-1.5 h-2 w-2 rounded-full shrink-0",
+                          r.overdue
+                            ? "bg-rose-500"
+                            : r.priority === "high"
+                            ? "bg-rose-400"
+                            : "bg-amber-400"
+                        )}
+                      />
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-xs font-medium truncate">
+                          {r.title}
+                        </span>
+                        <span
+                          className={cn(
+                            "block text-[10px]",
+                            r.overdue
+                              ? "text-rose-600 dark:text-rose-400 font-semibold"
+                              : "text-muted-foreground"
+                          )}
+                        >
+                          {r.overdue
+                            ? "Atrasado"
+                            : r.dueDate
+                            ? new Date(r.dueDate).toLocaleTimeString("pt-BR", {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })
+                            : "Hoje"}
+                        </span>
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+              <button
+                onClick={() => setView("reminders")}
+                className="w-full px-4 py-2.5 text-xs font-semibold text-primary hover:bg-primary/5 border-t border-border/60 transition-colors"
+              >
+                Abrir todos os lembretes →
+              </button>
+            </PopoverContent>
+          </Popover>
+
           <ThemeToggle />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

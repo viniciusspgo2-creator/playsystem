@@ -21,6 +21,8 @@ import {
   Sparkles,
   Factory,
   Repeat,
+  Plus,
+  Bell,
 } from "lucide-react";
 import {
   BarChart,
@@ -39,6 +41,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { useAppStore } from "@/lib/store";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
+import { apiPost, useRefresh } from "@/lib/api-hooks";
+import { toast } from "sonner";
+import { useState } from "react";
+import { cn } from "@/lib/utils";
 
 interface DashboardData {
   totals: {
@@ -74,12 +81,71 @@ interface DashboardData {
   serviceTypes: { name: string; color: string; count: number }[];
   overdueReceivables: any[];
   overduePayables: any[];
+  focus: {
+    reminders: {
+      id: string;
+      title: string;
+      priority: string;
+      dueDate: string | null;
+      overdue: boolean;
+    }[];
+    receivablesToday: {
+      id: string;
+      description: string;
+      amount: number;
+      person: string;
+    }[];
+    payablesToday: {
+      id: string;
+      description: string;
+      amount: number;
+      supplier: string;
+    }[];
+    overdueReceivablesCount: number;
+    overduePayablesCount: number;
+  };
   goal: { id: string; name: string; target: number; current: number; minDeposit: number; wallet?: string } | null;
 }
 
 export function DashboardView() {
   const { data, loading } = useFetch<DashboardData>("/api/dashboard");
   const setView = useAppStore((s) => s.setView);
+  const refresh = useRefresh();
+
+  // Quick-add de lembrete direto do Foco de Hoje
+  const [quickTitle, setQuickTitle] = useState("");
+  const [quickSaving, setQuickSaving] = useState(false);
+
+  async function quickAddReminder() {
+    const title = quickTitle.trim();
+    if (!title) {
+      toast.error("Escreva o que você não pode esquecer :)");
+      return;
+    }
+    setQuickSaving(true);
+    try {
+      const e = new Date();
+      e.setHours(23, 59, 59, 999);
+      await apiPost("/api/reminders", { title, dueDate: e.toISOString(), priority: "high" });
+      toast.success("Lembrete adicionado para hoje 🧠");
+      setQuickTitle("");
+      refresh();
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setQuickSaving(false);
+    }
+  }
+
+  async function completeFocusReminder(id: string) {
+    try {
+      await apiPost(`/api/reminders/${id}`, { action: "complete" }, "PATCH");
+      toast.success("Feito! 🎉");
+      refresh();
+    } catch (err: any) {
+      toast.error(err.message);
+    }
+  }
 
   if (loading || !data) {
     return (
@@ -121,6 +187,187 @@ export function DashboardView() {
         <MetricCard title="Crédito Disponível" value={formatCurrency(t.creditAvailable)} subtitle={`${formatCurrency(t.creditUsed)} em uso`} icon={<CreditCard className="h-5 w-5" />} variant="blue" delay={0.3} />
         <MetricCard title="Receita Mensal Fixa" value={formatCurrency(t.monthlyRevenue)} subtitle={`${data.counts.monthlyClients} mensalistas`} icon={<Repeat className="h-5 w-5" />} variant="brand" delay={0.35} />
       </div>
+
+      {/* ===== FOCO DE HOJE (modo TDAH) ===== */}
+      <Card className="border-primary/30 bg-gradient-to-br from-primary/5 via-transparent to-accent-blue/5">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+          <div>
+            <h3 className="font-semibold flex items-center gap-2">
+              <Target className="h-4 w-4 text-primary" />
+              Foco de Hoje
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              O que precisa de você agora — nada mais.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Input
+              value={quickTitle}
+              onChange={(e) => setQuickTitle(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") quickAddReminder();
+              }}
+              placeholder="+ lembrete rápido para hoje..."
+              className="h-9 text-xs sm:w-56"
+            />
+            <Button
+              size="sm"
+              className="h-9"
+              onClick={quickAddReminder}
+              disabled={quickSaving}
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Lembretes */}
+          <div className="rounded-xl border border-border/50 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold flex items-center gap-1.5">
+                <Bell className="h-3.5 w-3.5 text-primary" />
+                Lembretes
+              </p>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 text-[10px] px-2"
+                onClick={() => setView("reminders")}
+              >
+                Ver todos
+              </Button>
+            </div>
+            {data.focus.reminders.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground py-2">
+                Nada atrasado ou para hoje. Cabeça livre 🧘
+              </p>
+            ) : (
+              <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                {data.focus.reminders.map((r) => (
+                  <div
+                    key={r.id}
+                    className={cn(
+                      "flex items-start gap-2 rounded-lg p-1.5 text-xs",
+                      r.overdue ? "bg-rose-500/10" : "bg-amber-500/10"
+                    )}
+                  >
+                    <button
+                      onClick={() => completeFocusReminder(r.id)}
+                      title="Concluir"
+                      className="mt-0.5 h-4 w-4 shrink-0 rounded-full border-2 border-muted-foreground/40 hover:border-emerald-500 hover:bg-emerald-500/20 transition-colors"
+                    />
+                    <span className="flex-1 min-w-0">
+                      <span className="block font-medium truncate">{r.title}</span>
+                      <span
+                        className={cn(
+                          "block text-[10px] font-semibold",
+                          r.overdue
+                            ? "text-rose-600 dark:text-rose-400"
+                            : "text-amber-600 dark:text-amber-400"
+                        )}
+                      >
+                        {r.overdue
+                          ? "Atrasado"
+                          : r.dueDate
+                          ? new Date(r.dueDate).toLocaleTimeString("pt-BR", {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })
+                          : "Hoje"}
+                      </span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* A receber hoje */}
+          <div className="rounded-xl border border-border/50 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold flex items-center gap-1.5">
+                <ArrowUpFromLine className="h-3.5 w-3.5 text-emerald-500" />
+                A receber hoje
+              </p>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 text-[10px] px-2"
+                onClick={() => setView("receivable")}
+              >
+                {data.focus.overdueReceivablesCount > 0
+                  ? `${data.focus.overdueReceivablesCount} vencidas`
+                  : "Ver"}
+              </Button>
+            </div>
+            {data.focus.receivablesToday.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground py-2">
+                Nenhum recebível vence hoje.
+              </p>
+            ) : (
+              <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                {data.focus.receivablesToday.map((r) => (
+                  <div key={r.id} className="text-xs flex items-center justify-between gap-2">
+                    <span className="min-w-0">
+                      <span className="block font-medium truncate">{r.description}</span>
+                      <span className="block text-[10px] text-muted-foreground truncate">
+                        {r.person}
+                      </span>
+                    </span>
+                    <span className="font-semibold tabular-nums text-emerald-600 dark:text-emerald-400 shrink-0">
+                      {formatCurrency(r.amount)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* A pagar hoje */}
+          <div className="rounded-xl border border-border/50 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold flex items-center gap-1.5">
+                <ArrowDownToLine className="h-3.5 w-3.5 text-rose-500" />
+                A pagar hoje
+              </p>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 text-[10px] px-2"
+                onClick={() => setView("payable")}
+              >
+                {data.focus.overduePayablesCount > 0
+                  ? `${data.focus.overduePayablesCount} vencidas`
+                  : "Ver"}
+              </Button>
+            </div>
+            {data.focus.payablesToday.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground py-2">
+                Nenhuma conta vence hoje.
+              </p>
+            ) : (
+              <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                {data.focus.payablesToday.map((p) => (
+                  <div key={p.id} className="text-xs flex items-center justify-between gap-2">
+                    <span className="min-w-0">
+                      <span className="block font-medium truncate">{p.description}</span>
+                      {p.supplier && (
+                        <span className="block text-[10px] text-muted-foreground truncate">
+                          {p.supplier}
+                        </span>
+                      )}
+                    </span>
+                    <span className="font-semibold tabular-nums text-rose-600 dark:text-rose-400 shrink-0">
+                      {formatCurrency(p.amount)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </Card>
 
       {(t.overdueToReceive > 0 || t.overdueToPay > 0 || t.pendingPaymentCount > 0) && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

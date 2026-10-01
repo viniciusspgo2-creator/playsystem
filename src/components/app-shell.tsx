@@ -7,6 +7,7 @@ import { AuthGate } from "@/components/auth-gate";
 import { Sidebar } from "@/components/sidebar";
 import { AppHeader } from "@/components/app-header";
 import { DashboardView } from "@/components/views/dashboard";
+import { RemindersView } from "@/components/views/reminders";
 import { ClientsView } from "@/components/views/clients";
 import { ServicesView } from "@/components/views/services";
 import { TransactionsView } from "@/components/views/transactions";
@@ -60,6 +61,35 @@ export function AppShell() {
     }
   }, [authed]);
 
+  // Alerta de lembretes atrasados ao abrir o sistema (modo TDAH: não deixar passar)
+  useEffect(() => {
+    if (!authed) return;
+    const s = new Date();
+    s.setHours(0, 0, 0, 0);
+    const e = new Date();
+    e.setHours(23, 59, 59, 999);
+    fetch(
+      `/api/reminders/summary?from=${encodeURIComponent(s.toISOString())}&to=${encodeURIComponent(e.toISOString())}`
+    )
+      .then((r) => r.json())
+      .then((d) => {
+        const sum = d?.data;
+        if (!sum || !sum.badge) return;
+        const parts: string[] = [];
+        if (sum.overdue) parts.push(`${sum.overdue} atrasado${sum.overdue > 1 ? "s" : ""}`);
+        if (sum.today) parts.push(`${sum.today} para hoje`);
+        toast.warning("⏰ Lembretes esperando você", {
+          description: parts.join(" • "),
+          duration: 10000,
+          action: {
+            label: "Ver",
+            onClick: () => useAppStore.getState().setView("reminders"),
+          },
+        });
+      })
+      .catch(() => {});
+  }, [authed]);
+
   // Alerta de vencimentos UNITV ao abrir o sistema
   useEffect(() => {
     if (!authed) return;
@@ -108,6 +138,7 @@ export function AppShell() {
         <main className="flex-1 min-w-0">
           <div className="p-4 sm:p-6 max-w-[1600px] mx-auto pb-12">
             {view === "dashboard" && <DashboardView />}
+            {view === "reminders" && <RemindersView />}
             {view === "clients" && <ClientsView />}
             {view === "services" && <ServicesView />}
             {view === "transactions" && <TransactionsView />}

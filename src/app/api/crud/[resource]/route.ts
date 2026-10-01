@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
-import { getModel, INCLUDES } from "@/lib/crud-helpers";
+import { getModel, INCLUDES, ciContains, sanitizeForeignKeys, friendlyError } from "@/lib/crud-helpers";
 
 // GET /api/crud/[resource] -> list with optional filters
 export async function GET(
@@ -28,17 +28,17 @@ export async function GET(
       const fields: any[] = [];
       if (resource === "clients")
         fields.push(
-          { name: { contains: search, mode: "insensitive" } },
-          { email: { contains: search, mode: "insensitive" } },
-          { phone: { contains: search, mode: "insensitive" } }
+          { name: ciContains(search) },
+          { email: ciContains(search) },
+          { phone: ciContains(search) }
         );
       if (resource === "service-types")
-        fields.push({ name: { contains: search, mode: "insensitive" } });
+        fields.push({ name: ciContains(search) });
       if (resource === "orders")
         fields.push(
-          { title: { contains: search, mode: "insensitive" } },
-          { number: { contains: search, mode: "insensitive" } },
-          { description: { contains: search, mode: "insensitive" } }
+          { title: ciContains(search) },
+          { number: ciContains(search) },
+          { description: ciContains(search) }
         );
       where.OR = fields;
     }
@@ -52,7 +52,7 @@ export async function GET(
 
     return NextResponse.json({ data: items });
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 });
+    return NextResponse.json({ error: friendlyError(e) }, { status: 500 });
   }
 }
 
@@ -75,8 +75,29 @@ export async function POST(
     if (resource === "transactions") {
       return await createTransaction(body);
     }
+    if (resource === "receivables") {
+      // Contas a receber podem ser de clientes cadastrados OU de pessoa avulsa (nome livre)
+      // Vínculos inválidos (ordem/carteira/cliente inexistente) são descartados sem travar o fluxo
+      await sanitizeForeignKeys(resource, body);
+      const item = await model.create({
+        data: {
+          ...body,
+          clientId: body.clientId || null,
+          clientName: body.clientName || null,
+          walletId: body.walletId || null,
+          orderId: body.orderId || null,
+          paymentMethod: body.paymentMethod || null,
+          notes: body.notes || null,
+          amount: Number(body.amount) || 0,
+          ...(body.dueDate ? { dueDate: new Date(body.dueDate) } : {}),
+        },
+        include: INCLUDES[resource],
+      });
+      return NextResponse.json({ data: item });
+    }
     if (resource === "orders") {
       const number = `OS-${Date.now().toString().slice(-6)}`;
+      await sanitizeForeignKeys(resource, body);
       const item = await model.create({
         data: {
           ...body,
@@ -90,6 +111,7 @@ export async function POST(
     }
     if (resource === "receipts") {
       const number = `REC-${Date.now().toString().slice(-6)}`;
+      await sanitizeForeignKeys(resource, body);
       const item = await model.create({
         data: { ...body, number, amount: Number(body.amount) || 0 },
         include: INCLUDES[resource],
@@ -98,6 +120,7 @@ export async function POST(
     }
     if (resource === "budgets") {
       const number = `ORC-${Date.now().toString().slice(-6)}`;
+      await sanitizeForeignKeys(resource, body);
       const itemsStr =
         typeof body.items === "string"
           ? body.items
@@ -116,28 +139,28 @@ export async function POST(
       return NextResponse.json({ data: item });
     }
 
+    await sanitizeForeignKeys(resource, body);
     const item = await model.create({
       data: body,
       include: INCLUDES[resource],
     });
     return NextResponse.json({ data: item });
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 });
+    return NextResponse.json({ error: friendlyError(e) }, { status: 500 });
   }
 }
 
 // Helper: create transaction and update wallet/credit card balances
 async function createTransaction(body: any) {
+  const { type, category, description, amount, date, paymentMethod } = body;
+
+  // Valida vínculos ANTES de usar: "" / id inexistente → null (nunca explode FK)
+  await sanitizeForeignKeys("transactions", body);
   const {
-    type,
-    category,
-    description,
-    amount,
-    date,
-    paymentMethod,
     walletId,
     creditCardId,
     clientId,
+    clientName,
     orderId,
   } = body;
 
@@ -153,6 +176,7 @@ async function createTransaction(body: any) {
       walletId: walletId || null,
       creditCardId: creditCardId || null,
       clientId: clientId || null,
+      clientName: clientName || null,
       orderId: orderId || null,
     },
     include: INCLUDES.transactions,

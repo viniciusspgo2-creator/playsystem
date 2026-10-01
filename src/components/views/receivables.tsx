@@ -48,7 +48,8 @@ import { toast } from "sonner";
 
 interface Receivable {
   id: string;
-  clientId: string;
+  clientId?: string | null;
+  clientName?: string | null;
   description: string;
   amount: number | string;
   dueDate: string;
@@ -73,6 +74,11 @@ interface Wallet {
   type: string;
   balance: number;
   color: string;
+}
+interface Order {
+  id: string;
+  number: string;
+  title: string;
 }
 
 const PAYMENT_METHODS = [
@@ -139,6 +145,7 @@ export function ReceivablesView() {
   );
   const { data: clients } = useFetch<Client[]>("/api/crud/clients");
   const { data: wallets } = useFetch<Wallet[]>("/api/crud/wallets");
+  const { data: orders } = useFetch<Order[]>("/api/crud/orders");
   const refresh = useRefresh();
 
   const clientOptions = useMemo(
@@ -148,6 +155,14 @@ export function ReceivablesView() {
   const walletOptions = useMemo(
     () => (wallets ?? []).map((w) => ({ value: w.id, label: w.name })),
     [wallets]
+  );
+  const orderOptions = useMemo(
+    () =>
+      (orders ?? []).map((o) => ({
+        value: o.id,
+        label: o.number ? `${o.number} — ${o.title}` : o.title,
+      })),
+    [orders]
   );
 
   const stats = useMemo(() => {
@@ -191,7 +206,9 @@ export function ReceivablesView() {
         const s = search.toLowerCase();
         return (
           r.description?.toLowerCase().includes(s) ||
-          r.client?.name?.toLowerCase().includes(s)
+          r.client?.name?.toLowerCase().includes(s) ||
+          r.clientName?.toLowerCase().includes(s) ||
+          r.notes?.toLowerCase().includes(s)
         );
       })
       .sort(
@@ -241,12 +258,15 @@ export function ReceivablesView() {
       : "";
     return [
       {
-        name: "clientId",
-        label: "Cliente",
-        type: "select",
-        required: true,
+        name: "person",
+        label: "Quem vai pagar?",
+        type: "person",
         options: clientOptions,
-        default: editing?.clientId ?? "",
+        idField: "clientId",
+        nameField: "clientName",
+        placeholder: "Nome de quem deve — cadastrado ou avulso",
+        hint: "Não precisa cadastrar cliente: digite o nome da pessoa avulsa e pronto. Use as observações para lembrar quem é.",
+        default: editing?.client?.name ?? editing?.clientName ?? "",
       },
       {
         name: "description",
@@ -288,16 +308,17 @@ export function ReceivablesView() {
       },
       {
         name: "orderId",
-        label: "ID da Ordem",
-        type: "text",
-        placeholder: "Opcional",
+        label: "Ordem de Serviço",
+        type: "select",
+        options: orderOptions,
+        placeholder: "Nenhuma (opcional)",
         default: editing?.orderId ?? "",
       },
       {
         name: "notes",
         label: "Observações",
         type: "textarea",
-        placeholder: "Notas internas...",
+        placeholder: "Quem é? Contexto, combinado, telefone... (importante para avulsos)",
         default: editing?.notes ?? "",
       },
     ];
@@ -433,12 +454,25 @@ export function ReceivablesView() {
                             {r.description}
                           </p>
                           {statusBadge(r)}
+                          {!r.client && r.clientName && (
+                            <Badge
+                              variant="outline"
+                              className="bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20 text-[10px]"
+                            >
+                              Avulso
+                            </Badge>
+                          )}
                         </div>
                         <p className="text-xs text-muted-foreground mt-0.5 truncate">
                           {r.client ? (
                             <span className="inline-flex items-center gap-1">
                               <User className="h-3 w-3" />
                               {r.client.name} •{" "}
+                            </span>
+                          ) : r.clientName ? (
+                            <span className="inline-flex items-center gap-1">
+                              <User className="h-3 w-3" />
+                              {r.clientName} •{" "}
                             </span>
                           ) : null}
                           Vence:{" "}
@@ -494,7 +528,7 @@ export function ReceivablesView() {
         open={modalOpen}
         onOpenChange={setModalOpen}
         title={editing ? "Editar Conta a Receber" : "Nova Conta a Receber"}
-        description="Cadastre um valor a receber de cliente. Ao marcar como recebido, o valor será adicionado à carteira selecionada."
+        description="Pode ser de um cliente cadastrado OU de pessoa avulsa — só digitar o nome, sem precisar cadastrar. Ao marcar como recebido, o valor entra na carteira selecionada."
         fields={buildFields()}
         initialData={editing ?? undefined}
         endpoint="/api/crud/receivables"

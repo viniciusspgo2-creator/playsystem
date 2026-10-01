@@ -60,6 +60,7 @@ interface Tx {
   walletId?: string | null;
   creditCardId?: string | null;
   clientId?: string | null;
+  clientName?: string | null;
   orderId?: string | null;
   recurring?: boolean;
   client?: { id: string; name: string } | null;
@@ -78,6 +79,11 @@ interface Wallet {
 interface Client {
   id: string;
   name: string;
+}
+interface Order {
+  id: string;
+  number: string;
+  title: string;
 }
 interface CreditCard {
   id: string;
@@ -140,6 +146,7 @@ export function TransactionsView() {
   const { data: wallets } = useFetch<Wallet[]>("/api/crud/wallets");
   const { data: clients } = useFetch<Client[]>("/api/crud/clients");
   const { data: cards } = useFetch<CreditCard[]>("/api/crud/credit-cards");
+  const { data: orders } = useFetch<Order[]>("/api/crud/orders");
 
   const walletOptions = useMemo(
     () => (wallets ?? []).map((w) => ({ value: w.id, label: w.name })),
@@ -153,6 +160,14 @@ export function TransactionsView() {
     () => (cards ?? []).map((c) => ({ value: c.id, label: c.name })),
     [cards]
   );
+  const orderOptions = useMemo(
+    () =>
+      (orders ?? []).map((o) => ({
+        value: o.id,
+        label: o.number ? `${o.number} — ${o.title}` : o.title,
+      })),
+    [orders]
+  );
 
   const filtered = useMemo(() => {
     if (!txs) return [];
@@ -162,7 +177,10 @@ export function TransactionsView() {
       if (walletFilter !== "all" && t.walletId !== walletFilter) return false;
       if (search) {
         const s = search.toLowerCase();
-        if (!t.description?.toLowerCase().includes(s)) return false;
+        const desc = t.description?.toLowerCase().includes(s);
+        const clientName = t.client?.name?.toLowerCase().includes(s);
+        const freeName = t.clientName?.toLowerCase().includes(s);
+        if (!desc && !clientName && !freeName) return false;
       }
       if (dateFrom) {
         if (new Date(t.date) < new Date(dateFrom)) return false;
@@ -274,17 +292,22 @@ export function TransactionsView() {
         default: editing?.creditCardId ?? "",
       },
       {
-        name: "clientId",
-        label: "Cliente",
-        type: "select",
+        name: "person",
+        label: "Cliente / Pessoa",
+        type: "person",
         options: clientOptions,
-        default: editing?.clientId ?? "",
+        idField: "clientId",
+        nameField: "clientName",
+        placeholder: "Digite um nome livre ou escolha um cliente cadastrado",
+        hint: "Flexível: pode ser um cliente cadastrado ou qualquer pessoa avulsa — sem precisar cadastrar.",
+        default: editing?.client?.name ?? editing?.clientName ?? "",
       },
       {
         name: "orderId",
-        label: "ID da Ordem",
-        type: "text",
-        placeholder: "Opcional",
+        label: "Ordem de Serviço",
+        type: "select",
+        options: orderOptions,
+        placeholder: "Nenhuma (opcional)",
         default: editing?.orderId ?? "",
       },
     ];
@@ -480,6 +503,14 @@ export function TransactionsView() {
                         >
                           {CATEGORY_LABELS[t.category] ?? t.category}
                         </Badge>
+                        {!t.client && t.clientName && (
+                          <Badge
+                            variant="outline"
+                            className="bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20 text-[10px]"
+                          >
+                            Avulso
+                          </Badge>
+                        )}
                         {t.recurring && (
                           <Badge variant="outline" className="text-muted-foreground">
                             Recorrente
@@ -488,7 +519,11 @@ export function TransactionsView() {
                       </div>
                       <p className="text-xs text-muted-foreground mt-0.5 truncate">
                         {formatDateTime(t.date)}
-                        {t.client ? ` • ${t.client.name}` : ""}
+                        {t.client
+                          ? ` • ${t.client.name}`
+                          : t.clientName
+                          ? ` • ${t.clientName}`
+                          : ""}
                         {t.wallet ? ` • ${t.wallet.name}` : ""}
                         {t.creditCard ? ` • ${t.creditCard.name}` : ""}
                         {t.paymentMethod
@@ -546,7 +581,7 @@ export function TransactionsView() {
         open={modalOpen}
         onOpenChange={setModalOpen}
         title={editing ? "Editar Transação" : "Nova Transação"}
-        description="Lançamentos de entrada ou saída. Para compras no crédito, selecione um cartão — o limite será atualizado automaticamente."
+        description="Lançamentos de entrada ou saída. Pode ser de um cliente cadastrado ou de qualquer pessoa avulsa — só digitar o nome. Para compras no crédito, selecione um cartão."
         fields={buildFields()}
         initialData={editing ?? undefined}
         endpoint="/api/crud/transactions"

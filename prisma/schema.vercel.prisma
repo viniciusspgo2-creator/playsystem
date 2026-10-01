@@ -118,6 +118,7 @@ model Transaction {
   walletId      String?
   creditCardId  String?
   clientId      String?
+  clientName    String?  // nome livre (cliente/fornecedor avulso, sem cadastro)
   orderId       String?
   recurring     Boolean   @default(false)
   createdAt     DateTime @default(now())
@@ -181,7 +182,9 @@ model Payable {
 // ============================================================
 model Receivable {
   id            String   @id @default(cuid())
-  clientId      String
+  clientId      String?  // opcional: permite conta a receber de pessoa avulsa (sem cadastro)
+  clientName    String?  // nome livre (cliente/fornecedor avulso, sem cadastro)
+  // nome livre de quem deve (quando nao ha cliente cadastrado)
   description   String
   amount        Decimal  @db.Decimal(10, 2)
   dueDate       DateTime
@@ -352,4 +355,34 @@ model IptvRenewal {
 
   @@index([clientId])
   @@index([paidAt])
+}
+
+// ============================================================
+// LEMBRETES (foco TDAH — memória externa)
+// ============================================================
+model Reminder {
+  id        String    @id @default(cuid())
+  title     String
+  notes     String?
+  dueDate   DateTime?
+  priority  String    @default("normal")
+  category  String    @default("general")
+  repeat    String    @default("none")
+  done      Boolean   @default(false)
+  doneAt    DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([done])
+  @@index([dueDate])
+}
+
+// ============================================================
+// DESPEJO MENTAL (notas rápidas sem fricção)
+// ============================================================
+model QuickNote {
+  id        String   @id @default(cuid())
+  content   String
+  cleared   Boolean  @default(false)
+  createdAt DateTime @default(now())
 }

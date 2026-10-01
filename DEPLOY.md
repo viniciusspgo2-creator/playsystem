@@ -18,14 +18,17 @@ Configure no painel da Vercel → Settings → Environment Variables:
 1. **Suba o código para um repositório Git** (GitHub/GitLab/Bitbucket).
 2. **No painel da Vercel**: "Add New Project" → importe o repositório.
 3. **Configurar variáveis** (ver seção A).
-4. **O `prisma/schema.prisma` já é PostgreSQL** (pronto pra Vercel + Neon). Não precisa trocar nada.
-   - `DATABASE_URL` precisa começar com `postgresql://` (se começar com outra coisa, ou se o schema estiver em `sqlite`, dá o erro P1012 "the URL must start with the protocol `file:`").
-   - Para rodar local com SQLite: `cp prisma/schema.sqlite.prisma prisma/schema.prisma` e `DATABASE_URL="file:./dev.db"` (não commite essa troca).
-5. **O script de build** já está pronto em `package.json`:
+4. **Schemas Prisma** — o projeto tem 3 variantes:
+   - `prisma/schema.prisma` → **SQLite** (usado em dev local/sandbox, apontado por `DATABASE_URL=file:...`)
+   - `prisma/schema.sqlite.prisma` → cópia SQLite para dev local
+   - `prisma/schema.vercel.prisma` → **PostgreSQL (Vercel + Neon)** — é este que o build usa
+   - `DATABASE_URL` precisa começar com `postgresql://` na Vercel.
+   - **IMPORTANTE**: qualquer modelo/campo novo precisa ser adicionado nos TRÊS arquivos de schema.
+5. **O script de build** já está pronto em `package.json` e aponta direto pro schema PostgreSQL:
    ```
-   "build": "prisma generate && prisma db push --accept-data-loss --skip-generate && next build"
+   "build": "prisma generate --schema prisma/schema.vercel.prisma && prisma db push --schema prisma/schema.vercel.prisma --accept-data-loss --skip-generate && next build"
    ```
-   Ele gera o client Prisma, aplica o schema no banco e builda o Next.js.
+   Ele gera o client Prisma, aplica o schema no banco e builda o Next.js — sem precisar trocar arquivo nenhum.
 6. **Deploy** — a Vercel roda o build automaticamente.
 
 ### Após o primeiro deploy (rodar UMA vez)
@@ -45,6 +48,23 @@ Configure no painel da Vercel → Settings → Environment Variables:
 - **Credenciais padrão**: NÃO há credenciais fixas — a primeira senha é definida por você no setup. Isso é mais seguro.
 
 > Para resetar o acesso, delete o registro na tabela `User` do banco (via Neon console) e refaça o setup.
+
+## C2) Novidades desta versão (modo TDAH + lançamentos flexíveis)
+
+- **Lembretes (nova seção "Lembretes" na sidebar)**:
+  - Captura rápida: digite + Enter (data, prioridade e repetição são opcionais)
+  - Seções: Atrasados / Hoje / Próximos / Ideias (sem data) / Concluídos
+  - Adiar sem culpa (+1h, +3h, amanhã, +1 semana) e repetição automática (diário/semanal/mensal)
+  - "Despejo mental": notas rápidas sem formulário, com botão "Virar lembrete"
+  - Sino no header com badge e popover "Foco de agora"; toast ao abrir o sistema
+  - Painel **Foco de Hoje** no dashboard (lembretes + a receber hoje + a pagar hoje) com add rápido
+- **Lançamentos sem cliente cadastrado (Entradas & Saídas)**:
+  - O campo "Cliente / Pessoa" aceita qualquer nome digitado (pessoa avulsa) OU um cliente cadastrado (com sugestões)
+  - Badge "Avulso" identifica lançamentos sem cadastro
+- **Contas a receber avulsas**:
+  - O campo "Quem vai pagar?" é opcional para clientes cadastrados — digite o nome livre e use as observações
+  - Badge "Avulso" + busca por nome livre e observações
+- **Edição de transações corrige saldo**: editar valor/carteira/cartão de um lançamento agora reconcilia o saldo da carteira e o limite usado do cartão automaticamente.
 
 ## D) Build TypeScript
 
