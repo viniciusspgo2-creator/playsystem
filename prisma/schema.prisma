@@ -1,0 +1,313 @@
+// PlayMedia System - Prisma Schema
+// Local dev: SQLite (works in preview)
+// For Vercel deploy: use prisma/schema.vercel.prisma (PostgreSQL version)
+// See instructions in DEPLOY.md
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// AUTH
+// ============================================================
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String?
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// ============================================================
+// CLIENTES
+// ============================================================
+model Client {
+  id          String   @id @default(cuid())
+  name        String
+  email       String?
+  phone       String?
+  document    String?
+  address     String?
+  city        String?
+  state       String?
+  zip         String?
+  notes       String?
+  isMonthly   Boolean  @default(false)
+  monthlyFee  Decimal?
+  monthlyDay  Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  orders      ServiceOrder[]
+  receivables Receivable[]
+  receipts    Receipt[]
+  budgets     Budget[]
+  transactions Transaction[]
+}
+
+// ============================================================
+// TIPOS DE SERVIÇO
+// ============================================================
+model ServiceType {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  color       String   @default("#FF6B00")
+  icon        String?
+  basePrice   Decimal?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  orders ServiceOrder[]
+}
+
+// ============================================================
+// ORDENS DE SERVIÇO / PRODUÇÃO
+// ============================================================
+model ServiceOrder {
+  id           String   @id @default(cuid())
+  number       String   @unique
+  clientId     String
+  serviceTypeId String
+  title        String
+  description  String?
+  status       String   @default("todo")
+  priority     String   @default("medium")
+  price        Decimal
+  cost         Decimal  @default(0)
+  deadline     DateTime?
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  deliveredAt  DateTime?
+  paid         Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  serviceType  ServiceType  @relation(fields: [serviceTypeId], references: [id])
+  transactions Transaction[]
+  receipts     Receipt[]
+  budgets      Budget[]
+  receivables  Receivable[]
+
+  @@index([clientId])
+  @@index([serviceTypeId])
+  @@index([status])
+}
+
+// ============================================================
+// TRANSAÇÕES
+// ============================================================
+model Transaction {
+  id            String   @id @default(cuid())
+  type          String   // income | expense
+  category      String
+  description   String
+  amount        Decimal
+  date          DateTime @default(now())
+  paymentMethod String?
+  walletId      String?
+  creditCardId  String?
+  clientId      String?
+  orderId       String?
+  recurring     Boolean   @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  client     Client?        @relation(fields: [clientId], references: [id])
+  order      ServiceOrder?  @relation(fields: [orderId], references: [id])
+  wallet     Wallet?        @relation(fields: [walletId], references: [id])
+  creditCard CreditCard?    @relation(fields: [creditCardId], references: [id])
+
+  @@index([type])
+  @@index([date])
+  @@index([walletId])
+}
+
+// ============================================================
+// CONTAS FIXAS
+// ============================================================
+model FixedAccount {
+  id            String   @id @default(cuid())
+  name          String
+  category      String
+  amount        Decimal
+  dueDay        Int
+  paymentMethod String?
+  walletId      String?
+  creditCardId  String?
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  wallet     Wallet?     @relation(fields: [walletId], references: [id])
+  creditCard CreditCard? @relation(fields: [creditCardId], references: [id])
+}
+
+// ============================================================
+// CONTAS A PAGAR
+// ============================================================
+model Payable {
+  id            String   @id @default(cuid())
+  description   String
+  amount        Decimal
+  dueDate       DateTime
+  paid          Boolean  @default(false)
+  paidAt        DateTime?
+  paymentMethod String?
+  walletId      String?
+  creditCardId  String?
+  category      String?
+  supplier      String?
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  wallet     Wallet?     @relation(fields: [walletId], references: [id])
+  creditCard CreditCard? @relation(fields: [creditCardId], references: [id])
+}
+
+// ============================================================
+// CONTAS A RECEBER
+// ============================================================
+model Receivable {
+  id            String   @id @default(cuid())
+  clientId      String
+  description   String
+  amount        Decimal
+  dueDate       DateTime
+  received      Boolean  @default(false)
+  receivedAt    DateTime?
+  paymentMethod String?
+  walletId      String?
+  orderId       String?
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  client     Client?        @relation(fields: [clientId], references: [id])
+  wallet     Wallet?        @relation(fields: [walletId], references: [id])
+  order      ServiceOrder?  @relation(fields: [orderId], references: [id])
+}
+
+// ============================================================
+// CARTEIRAS
+// ============================================================
+model Wallet {
+  id          String   @id @default(cuid())
+  name        String
+  type        String
+  balance     Decimal  @default(0)
+  color       String   @default("#0066FF")
+  icon        String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  transactions  Transaction[]
+  fixedAccounts FixedAccount[]
+  payables      Payable[]
+  receivables   Receivable[]
+  creditCards   CreditCard[]
+  goal          Goal?
+}
+
+// ============================================================
+// CARTÕES DE CRÉDITO
+// ============================================================
+model CreditCard {
+  id          String   @id @default(cuid())
+  name        String
+  walletId    String?
+  totalLimit  Decimal
+  usedLimit   Decimal  @default(0)
+  closingDay  Int?
+  dueDay      Int?
+  color       String   @default("#FF6B00")
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  wallet       Wallet?      @relation(fields: [walletId], references: [id])
+  transactions Transaction[]
+  fixedAccounts FixedAccount[]
+  payables      Payable[]
+}
+
+// ============================================================
+// METAS DE DEPÓSITO
+// ============================================================
+model Goal {
+  id            String   @id @default(cuid())
+  name          String
+  targetAmount  Decimal
+  currentAmount Decimal  @default(0)
+  minDeposit    Decimal
+  deadline      DateTime?
+  walletId      String?  @unique
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  wallet Wallet? @relation(fields: [walletId], references: [id])
+}
+
+// ============================================================
+// COMPROVANTES DE PAGAMENTO
+// ============================================================
+model Receipt {
+  id            String   @id @default(cuid())
+  number        String   @unique
+  clientId      String?
+  orderId       String?
+  payer         String
+  recipient     String
+  amount        Decimal
+  description   String
+  paymentMethod String
+  date          DateTime @default(now())
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  client Client?       @relation(fields: [clientId], references: [id])
+  order ServiceOrder?  @relation(fields: [orderId], references: [id])
+}
+
+// ============================================================
+// ORÇAMENTOS
+// ============================================================
+model Budget {
+  id          String   @id @default(cuid())
+  number      String   @unique
+  clientId    String?
+  orderId     String?
+  title       String
+  items       String   // JSON string (SQLite doesn't support Json)
+  total       Decimal
+  discount    Decimal  @default(0)
+  finalTotal  Decimal
+  validUntil  DateTime?
+  status      String   @default("draft")
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  client Client?      @relation(fields: [clientId], references: [id])
+  order ServiceOrder? @relation(fields: [orderId], references: [id])
+}
+
+// ============================================================
+// CONFIGURAÇÕES
+// ============================================================
+model Setting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String
+}

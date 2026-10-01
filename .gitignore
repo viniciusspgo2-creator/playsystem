@@ -1,0 +1,9 @@
+/node_modules
+/.next
+.env
+.env*.local
+*.log
+dev.log
+server.log
+/prisma/*.db
+/db/*.db
